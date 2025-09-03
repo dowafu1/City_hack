@@ -196,11 +196,11 @@ async def test_show_main_greeting():
   msg.answer = AsyncMock()
   await show_main(msg, edit=False, greeting=True)
   msg.answer.assert_called_with(
-      "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
-      "🔹 Помогу найти контакты служб\n"
-      "🔹 Дам советы и инструкции\n"
-      "🔹 Расскажу о мероприятиях\n\n"
-      "✨ Всё конфиденциально и без лишних формальностей!\n\nВыберите действие:", reply_markup=ANY)
+    "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
+    "🔹 Помогу найти контакты служб\n"
+    "🔹 Дам советы и инструкции\n"
+    "🔹 Расскажу о мероприятиях\n\n"
+    "✨ Всё конфиденциально и без лишних формальностей!\n\nВыберите действие:", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -213,11 +213,11 @@ async def test_start_no_role():
   with patch('backend.bot.get_role', return_value=None), patch('backend.bot.log'):
     await start(msg, state)
   msg.answer.assert_called_with(
-      "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
-      "🔹 Помогу найти контакты служб\n"
-      "🔹 Дам советы и инструкции\n"
-      "🔹 Расскажу о мероприятиях\n\n"
-      "✨ Всё конфиденциально и без лишних формальностей!\n\nВыбери роль:", reply_markup=ANY)
+    "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
+    "🔹 Помогу найти контакты служб\n"
+    "🔹 Дам советы и инструкции\n"
+    "🔹 Расскажу о мероприятиях\n\n"
+    "✨ Всё конфиденциально и без лишних формальностей!\n\nВыбери роль:", reply_markup=ANY)
   state.set_state.assert_called_with(RoleForm.role)
 
 
@@ -343,7 +343,8 @@ async def test_sos_no_data():
   cb.message.edit_text = AsyncMock()
   with patch('backend.bot.log'):
     await sos(cb)
-  cb.message.edit_text.assert_called_with("🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии.", reply_markup=ANY)
+  cb.message.edit_text.assert_called_with(
+    "🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии.", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -587,7 +588,8 @@ async def test_back():
 async def test_notifier_with_sub_and_tip(mock_db):
   mock_bot = MagicMock()
   mock_bot.send_message = AsyncMock()
-  with patch('backend.bot.bot', mock_bot), patch('asyncio.sleep', new_callable=AsyncMock), patch('datetime.datetime') as mock_dt:
+  with patch('backend.bot.bot', mock_bot), patch('asyncio.sleep', new_callable=AsyncMock), patch(
+      'datetime.datetime') as mock_dt:
     mock_now = datetime(2023, 1, 1)
     mock_dt.now.return_value = mock_now
     mock_dt.fromisoformat.side_effect = datetime.fromisoformat
