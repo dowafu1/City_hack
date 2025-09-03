@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -15,10 +16,14 @@ WELCOME_TEXT = (
   "🔹 Дам советы и инструкции\n"
   "🔹 Расскажу о мероприятиях\n\n"
   "✨ Всё конфиденциально и без лишних формальностей!"
+  "✨ Всё конфиденциально и без лишних формальностей!"
 )
 
 load_dotenv()
-bot = Bot(token=os.getenv("BOT_TOKEN"), parse_mode="Markdown")
+bot = Bot(
+  token=os.getenv("BOT_TOKEN"),
+  default=DefaultBotProperties(parse_mode="Markdown")
+)
 dp = Dispatcher(storage=MemoryStorage())
 
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x}
@@ -109,23 +114,24 @@ async def show_main(obj, edit=True, greeting=False):
 
 
 @dp.message(Command("start"))
-async def start(m: types.Message, s: FSMContext):
+async def start(m: types.Message, state: FSMContext):
   await log(m.from_user.id, "start")
   r = await get_role(m.from_user.id)
   if not r:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True,
-                             keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
-    await m.answer(WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb);
-    await s.set_state(RoleForm.role)
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+      [KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]
+    ])
+    await m.answer(WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
+    await state.set_state(RoleForm.role)
   else:
     await show_main(m, edit=False, greeting=True)
 
 
 @dp.message(RoleForm.role)
-async def choose_role(m: types.Message, s: FSMContext):
-  await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
-  await s.clear();
-  await show_main(m, edit=False, greeting=True)
+async def choose_role(m: types.Message, state: FSMContext):
+    await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
+    await state.clear()
+    await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "navigator")
@@ -178,16 +184,16 @@ async def events(c: types.CallbackQuery):
 
 
 @dp.callback_query(F.data == "question")
-async def question(c: types.CallbackQuery, s: FSMContext):
+async def question(c: types.CallbackQuery, state: FSMContext):
   await c.message.edit_text("Напиши вопрос ❓");
-  await s.set_state(QuestionForm.question)
+  await state.set_state(QuestionForm.question)
 
 
 @dp.message(QuestionForm.question)
-async def save_question(m: types.Message, s: FSMContext):
+async def save_question(m: types.Message, state: FSMContext):
   with db() as x: x.execute("INSERT INTO questions (user_id,question,timestamp) VALUES (?,?,?)",
                             (m.from_user.id, m.text, datetime.now().isoformat()))
-  await s.clear();
+  await state.clear();
   await m.answer("Вопрос отправлен 🚀");
   await show_main(m, edit=False)
 
@@ -216,16 +222,18 @@ async def sub(c: types.CallbackQuery):
   with db() as x:
     r = x.execute("SELECT next_at FROM subs WHERE user_id=?", (c.from_user.id,)).fetchone()
     if r:
-      x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,)); await c.answer("Подписка отключена")
+      x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,));
+      await c.answer("Подписка отключена")
     else:
       x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
-                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat())); await c.answer(
+                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat()));
+      await c.answer(
         "Буду присылать советы раз в день")
   await show_main(c)
 
 
 @dp.callback_query(F.data == "admin")
-async def admin(c: types.CallbackQuery, s: FSMContext):
+async def admin(c: types.CallbackQuery, state: FSMContext):
   if c.from_user.id not in ADMIN_IDS: return
   kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
@@ -236,30 +244,31 @@ async def admin(c: types.CallbackQuery, s: FSMContext):
     [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
   ])
   await c.message.edit_text("Админ: выбери раздел", reply_markup=kb);
-  await s.set_state(AdminForm.section)
+  await state.set_state(AdminForm.section)
 
 
 @dp.callback_query(F.data.startswith("ad_"))
-async def admin_pick(c: types.CallbackQuery, s: FSMContext):
+async def admin_pick(c: types.CallbackQuery, state: FSMContext):
   if c.from_user.id not in ADMIN_IDS: return
   m = {"ad_contacts": "Формат: category|name|+7(XXX)XXX-XX-XX|description", "ad_sos": "Текст SOS",
        "ad_event": "title|YYYY-MM-DD|description|link", "ad_article": "category|title|content",
        "ad_tip": "Текст совета"}[c.data]
   await c.message.edit_text(m);
-  await s.update_data(section=c.data);
-  await s.set_state(AdminForm.payload)
+  await state.update_data(section=c.data);
+  await state.set_state(AdminForm.payload)
 
 
 @dp.message(AdminForm.payload)
-async def admin_save(m: types.Message, s: FSMContext):
+async def admin_save(m: types.Message, state: FSMContext):
   if m.from_user.id not in ADMIN_IDS: return
-  d = (await s.get_data())["section"];
+  d = (await state.get_data())["section"];
   p = [x.strip() for x in m.text.split('|')]
   with db() as x:
     if d == "ad_contacts" and len(p) == 4 and PHONE_RX.fullmatch(p[2]):
       x.execute("INSERT INTO contacts (category,name,phone,description) VALUES (?,?,?,?)", tuple(p))
     elif d == "ad_sos":
-      x.execute("DELETE FROM sos_instructions"); x.execute("INSERT INTO sos_instructions (text) VALUES (?)", (m.text,))
+      x.execute("DELETE FROM sos_instructions");
+      x.execute("INSERT INTO sos_instructions (text) VALUES (?)", (m.text,))
     elif d == "ad_event" and len(p) == 4:
       x.execute("INSERT INTO events (title,date,description,link) VALUES (?,?,?,?)", tuple(p))
     elif d == "ad_article" and len(p) == 3:
@@ -267,8 +276,9 @@ async def admin_save(m: types.Message, s: FSMContext):
     elif d == "ad_tip":
       x.execute("INSERT INTO tips (text) VALUES (?)", (m.text,))
     else:
-      await m.answer("Неверный формат"); return
-  await s.clear();
+      await m.answer("Неверный формат");
+      return
+  await state.clear();
   await m.answer("Сохранено");
   await show_main(m, edit=False)
 
