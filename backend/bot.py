@@ -5,10 +5,10 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
-from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.client.default import DefaultBotProperties
 
 WELCOME_TEXT = (
   "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
@@ -16,14 +16,10 @@ WELCOME_TEXT = (
   "🔹 Дам советы и инструкции\n"
   "🔹 Расскажу о мероприятиях\n\n"
   "✨ Всё конфиденциально и без лишних формальностей!"
-  "✨ Всё конфиденциально и без лишних формальностей!"
 )
 
 load_dotenv()
-bot = Bot(
-  token=os.getenv("BOT_TOKEN"),
-  default=DefaultBotProperties(parse_mode="Markdown")
-)
+bot = Bot(os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher(storage=MemoryStorage())
 
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x}
@@ -57,7 +53,7 @@ def db(): return sqlite3.connect("cmpbot.db")
 
 def init_db():
   with db() as c:
-    x = c.cursor();
+    x = c.cursor()
     x.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, role TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, category TEXT, title TEXT, content TEXT)")
     x.execute(
@@ -93,34 +89,33 @@ async def log(u, a):
 
 def main_menu(u):
   rows = [
-    [InlineKeyboardButton(text="🧭 Навигатор помощи", callback_data="navigator")],
-    [InlineKeyboardButton(text="📞 Куда обращаться?", callback_data="contacts")],
-    [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
-    [InlineKeyboardButton(text="📅 Мероприятия", callback_data="events")],
-    [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="question")],
-    [InlineKeyboardButton(text="💡 Совет дня", callback_data="tip")],
-    [InlineKeyboardButton(text="📊 Опрос", callback_data="poll")],
-    [InlineKeyboardButton(text="🔔 Подписаться на советы", callback_data="sub")]
+    [InlineKeyboardButton("🧭 Навигатор помощи", callback_data="navigator")],
+    [InlineKeyboardButton("📞 Куда обращаться?", callback_data="contacts")],
+    [InlineKeyboardButton("🆘 Тревожная кнопка", callback_data="sos")],
+    [InlineKeyboardButton("📅 Мероприятия", callback_data="events")],
+    [InlineKeyboardButton("❓ Задать вопрос", callback_data="question")],
+    [InlineKeyboardButton("💡 Совет дня", callback_data="tip")],
+    [InlineKeyboardButton("📊 Опрос", callback_data="poll")],
+    [InlineKeyboardButton("🔔 Подписаться на советы", callback_data="sub")]
   ]
-  if u in ADMIN_IDS: rows.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
+  if u in ADMIN_IDS: rows.append([InlineKeyboardButton("⚙️ Админ панель", callback_data="admin")])
   return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def show_main(obj, edit=True, greeting=False):
   t = (WELCOME_TEXT + "\n\nВыберите действие:" if greeting else "Главное меню:")
-  (await obj.message.edit_text(t, reply_markup=main_menu(obj.from_user.id))) if edit else await obj.answer(t,
-                                                                                                           reply_markup=main_menu(
-                                                                                                             obj.from_user.id))
+  if edit:
+    await obj.message.edit_text(t, reply_markup=main_menu(obj.from_user.id))
+  else:
+    await obj.answer(t, reply_markup=main_menu(obj.from_user.id))
 
 
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
   await log(m.from_user.id, "start")
-  r = await get_role(m.from_user.id)
-  if not r:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
-      [KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]
-    ])
+  if not (r := await get_role(m.from_user.id)):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True,
+                             keyboard=[[KeyboardButton("Я подросток"), KeyboardButton("Я родитель")]])
     await m.answer(WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
     await state.set_state(RoleForm.role)
   else:
@@ -129,19 +124,19 @@ async def start(m: types.Message, state: FSMContext):
 
 @dp.message(RoleForm.role)
 async def choose_role(m: types.Message, state: FSMContext):
-    await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
-    await state.clear()
-    await show_main(m, edit=False)
+  await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
+  await state.clear();
+  await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "navigator")
 async def nav(c: types.CallbackQuery):
   await log(c.from_user.id, "navigator")
   kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="😟 Мне нужна помощь", callback_data="help_me")],
-    [InlineKeyboardButton(text="🚨 Хочу сообщить о...", callback_data="report")],
-    [InlineKeyboardButton(text="❓ Другое", callback_data="other")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+    [InlineKeyboardButton("😟 Мне нужна помощь", callback_data="help_me")],
+    [InlineKeyboardButton("🚨 Хочу сообщить о...", callback_data="report")],
+    [InlineKeyboardButton("❓ Другое", callback_data="other")],
+    [InlineKeyboardButton("🔙 Назад", callback_data="back")]
   ])
   await c.message.edit_text("Навигатор помощи:", reply_markup=kb)
 
@@ -153,7 +148,7 @@ async def nav_sub(c: types.CallbackQuery):
                                    (f"{c.data}_{role}",)).fetchall()
   t = "\n".join(f"{a}: {b}" for a, b in rows) or "Нет информации 😔"
   await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]]))
+    inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="navigator")]]))
 
 
 @dp.callback_query(F.data == "contacts")
@@ -162,7 +157,7 @@ async def contacts(c: types.CallbackQuery):
   with db() as x: rows = x.execute("SELECT category,name,phone,description FROM contacts").fetchall()
   t = "\n".join(f"{a}: {b} — {p} ({d})" for a, b, p, d in rows) or "Нет контактов 😔"
   await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+    inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "sos")
@@ -171,7 +166,7 @@ async def sos(c: types.CallbackQuery):
   with db() as x: r = x.execute("SELECT text FROM sos_instructions LIMIT 1").fetchone()
   t = r[0] if r else "🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии."
   await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+    inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "events")
@@ -180,7 +175,7 @@ async def events(c: types.CallbackQuery):
   with db() as x: rows = x.execute("SELECT title,date,description,link FROM events").fetchall()
   t = "\n".join(f"{a} ({d}): {b} — {l}" for a, d, b, l in rows) or "Нет мероприятий 📅"
   await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+    inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "question")
@@ -204,18 +199,14 @@ async def tip(c: types.CallbackQuery):
   with db() as x: r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
   await c.message.edit_text(r[0] if r else "Совет дня: подыши глубже, это помогает. 😊",
                             reply_markup=InlineKeyboardMarkup(
-                              inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+                              inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "poll")
 async def poll(c: types.CallbackQuery):
-  await c.message.answer_poll("Что волнует больше?", ["Стресс", "Буллинг", "Цифр. безопасность"], is_anonymous=False)
-
-
-@dp.poll_answer()
-async def poll_answer(a: types.PollAnswer):
-    with db() as x:
-        x.execute("INSERT INTO polls (poll_id,results) VALUES (?,?)", (a.poll_id, str(a.option_ids)))
+  await log(c.from_user.id, "poll")
+  await c.message.edit_text("Пока опросов нету 📊", reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton("🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "sub")
@@ -223,12 +214,10 @@ async def sub(c: types.CallbackQuery):
   with db() as x:
     r = x.execute("SELECT next_at FROM subs WHERE user_id=?", (c.from_user.id,)).fetchone()
     if r:
-      x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,));
-      await c.answer("Подписка отключена")
+      x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,)); await c.answer("Подписка отключена")
     else:
       x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
-                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat()));
-      await c.answer(
+                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat())); await c.answer(
         "Буду присылать советы раз в день")
   await show_main(c)
 
@@ -237,12 +226,12 @@ async def sub(c: types.CallbackQuery):
 async def admin(c: types.CallbackQuery, state: FSMContext):
   if c.from_user.id not in ADMIN_IDS: return
   kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
-    [InlineKeyboardButton(text="🆘 SOS", callback_data="ad_sos")],
-    [InlineKeyboardButton(text="📅 Событие", callback_data="ad_event")],
-    [InlineKeyboardButton(text="📝 Статья", callback_data="ad_article")],
-    [InlineKeyboardButton(text="💡 Совет", callback_data="ad_tip")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+    [InlineKeyboardButton("📒 Контакты", callback_data="ad_contacts")],
+    [InlineKeyboardButton("🆘 SOS", callback_data="ad_sos")],
+    [InlineKeyboardButton("📅 Событие", callback_data="ad_event")],
+    [InlineKeyboardButton("📝 Статья", callback_data="ad_article")],
+    [InlineKeyboardButton("💡 Совет", callback_data="ad_tip")],
+    [InlineKeyboardButton("🔙 Назад", callback_data="back")]
   ])
   await c.message.edit_text("Админ: выбери раздел", reply_markup=kb);
   await state.set_state(AdminForm.section)
@@ -268,8 +257,7 @@ async def admin_save(m: types.Message, state: FSMContext):
     if d == "ad_contacts" and len(p) == 4 and PHONE_RX.fullmatch(p[2]):
       x.execute("INSERT INTO contacts (category,name,phone,description) VALUES (?,?,?,?)", tuple(p))
     elif d == "ad_sos":
-      x.execute("DELETE FROM sos_instructions");
-      x.execute("INSERT INTO sos_instructions (text) VALUES (?)", (m.text,))
+      x.execute("DELETE FROM sos_instructions"); x.execute("INSERT INTO sos_instructions (text) VALUES (?)", (m.text,))
     elif d == "ad_event" and len(p) == 4:
       x.execute("INSERT INTO events (title,date,description,link) VALUES (?,?,?,?)", tuple(p))
     elif d == "ad_article" and len(p) == 3:
@@ -277,8 +265,7 @@ async def admin_save(m: types.Message, state: FSMContext):
     elif d == "ad_tip":
       x.execute("INSERT INTO tips (text) VALUES (?)", (m.text,))
     else:
-      await m.answer("Неверный формат");
-      return
+      await m.answer("Неверный формат"); return
   await state.clear();
   await m.answer("Сохранено");
   await show_main(m, edit=False)
