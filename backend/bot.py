@@ -1,235 +1,300 @@
-import os, sqlite3, asyncio
-from datetime import datetime
+import os, re, sqlite3, asyncio
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import (
-  InlineKeyboardMarkup, InlineKeyboardButton,
-  ReplyKeyboardMarkup, KeyboardButton
-)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
+WELCOME_TEXT = (
+  "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
+  "🔹 Помогу найти контакты служб\n"
+  "🔹 Дам советы и инструкции\n"
+  "🔹 Расскажу о мероприятиях\n\n"
+  "✨ Всё конфиденциально и без лишних формальностей!"
+)
+
 load_dotenv()
-bot = Bot(token=os.getenv("BOT_TOKEN"))
+bot = Bot(token=os.getenv("BOT_TOKEN"), parse_mode="Markdown")
 dp = Dispatcher(storage=MemoryStorage())
 
-ADMIN_IDS = [123456789]
+ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x}
+PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
 
 class ThrottlingMiddleware(BaseMiddleware):
-  def __init__(self, rate=10):
-    self.rate, self.calls = rate, {}
+  def __init__(self, rate=10): self.rate, self.calls = rate, {}
 
   async def __call__(self, handler, event, data):
-    uid, now = event.from_user.id, asyncio.get_event_loop().time()
-    if uid in self.calls and now - self.calls[uid] < 1 / self.rate:
-      return
-    self.calls[uid] = now
+    u, t = event.from_user.id, asyncio.get_running_loop().time()
+    if (p := self.calls.get(u)) and t - p < 1 / self.rate: return
+    self.calls[u] = t;
     return await handler(event, data)
 
 
 dp.message.middleware(ThrottlingMiddleware())
 
 
-class RoleForm(StatesGroup):
-  role = State()
+class RoleForm(StatesGroup): role = State()
 
 
-class QuestionForm(StatesGroup):
-  question = State()
+class QuestionForm(StatesGroup): question = State()
 
 
-class AdminForm(StatesGroup):
-  action, data = State(), State()
+class AdminForm(StatesGroup): section, payload = State(), State()
 
 
-def db():
-  return sqlite3.connect("cmpbot.db")
+def db(): return sqlite3.connect("cmpbot.db")
 
 
 def init_db():
-  with db() as conn:
-    c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, role TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, category TEXT, title TEXT, content TEXT)")
-    c.execute(
+  with db() as c:
+    x = c.cursor();
+    x.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, role TEXT)")
+    x.execute("CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, category TEXT, title TEXT, content TEXT)")
+    x.execute(
       "CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY, category TEXT, name TEXT, phone TEXT, description TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS sos_instructions (id INTEGER PRIMARY KEY, text TEXT)")
-    c.execute(
+    x.execute("CREATE TABLE IF NOT EXISTS sos_instructions (id INTEGER PRIMARY KEY, text TEXT)")
+    x.execute(
       "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, title TEXT, date TEXT, description TEXT, link TEXT)")
-    c.execute(
+    x.execute(
       "CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY, user_id INTEGER, question TEXT, timestamp TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tips (id INTEGER PRIMARY KEY, text TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS polls (id INTEGER PRIMARY KEY, poll_id TEXT, results TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp TEXT)")
+    x.execute("CREATE TABLE IF NOT EXISTS tips (id INTEGER PRIMARY KEY, text TEXT)")
+    x.execute("CREATE TABLE IF NOT EXISTS polls (id INTEGER PRIMARY KEY, poll_id TEXT, results TEXT)")
+    x.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp TEXT)")
+    x.execute("CREATE TABLE IF NOT EXISTS subs (user_id INTEGER PRIMARY KEY, next_at TEXT)")
 
 
 init_db()
 
 
-async def get_role(uid):
-  with db() as conn:
-    cur = conn.execute("SELECT role FROM users WHERE user_id=?", (uid,))
-    row = cur.fetchone()
-  return row[0] if row else None
+async def get_role(u):
+  with db() as c:
+    r = c.execute("SELECT role FROM users WHERE user_id=?", (u,)).fetchone()
+  return r[0] if r else None
 
 
-async def set_role(uid, role):
-  with db() as conn: conn.execute(
-    "INSERT OR REPLACE INTO users (user_id, role) VALUES (?,?)", (uid, role)
-  )
+async def set_role(u, role):
+  with db() as c: c.execute("INSERT OR REPLACE INTO users (user_id, role) VALUES (?,?)", (u, role))
 
 
-async def log(uid, action):
-  with db() as conn: conn.execute(
-    "INSERT INTO logs (user_id, action, timestamp) VALUES (?,?,?)",
-    (uid, action, datetime.now().isoformat())
-  )
+async def log(u, a):
+  with db() as c: c.execute("INSERT INTO logs (user_id, action, timestamp) VALUES (?,?,?)",
+                            (u, a, datetime.now().isoformat()))
 
 
-def main_menu(uid):
-  kb = [[InlineKeyboardButton(text="🧭 Навигатор помощи", callback_data="navigator")],
-        [InlineKeyboardButton(text="📞 Куда обращаться?", callback_data="contacts")],
-        [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
-        [InlineKeyboardButton(text="📅 Мероприятия", callback_data="events")],
-        [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="question")],
-        [InlineKeyboardButton(text="💡 Совет дня", callback_data="tip")],
-        [InlineKeyboardButton(text="📊 Опрос", callback_data="poll")]]
-  if uid in ADMIN_IDS:
-    kb.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
-  return InlineKeyboardMarkup(inline_keyboard=kb)
+def main_menu(u):
+  rows = [
+    [InlineKeyboardButton(text="🧭 Навигатор помощи", callback_data="navigator")],
+    [InlineKeyboardButton(text="📞 Куда обращаться?", callback_data="contacts")],
+    [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
+    [InlineKeyboardButton(text="📅 Мероприятия", callback_data="events")],
+    [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="question")],
+    [InlineKeyboardButton(text="💡 Совет дня", callback_data="tip")],
+    [InlineKeyboardButton(text="📊 Опрос", callback_data="poll")],
+    [InlineKeyboardButton(text="🔔 Подписаться на советы", callback_data="sub")]
+  ]
+  if u in ADMIN_IDS: rows.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
+  return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def show_main(obj, edit=True, greeting=False):
-  text = (
-    "Добро пожаловать в ЦМП бот Томской области! 🌟\n\nВыберите действие:"
-    if greeting else "Главное меню:"
-  )
-  if edit:
-    await obj.message.edit_text(text, reply_markup=main_menu(obj.from_user.id))
-  else:
-    await obj.answer(text, reply_markup=main_menu(obj.from_user.id))
+  t = (WELCOME_TEXT + "\n\nВыберите действие:" if greeting else "Главное меню:")
+  (await obj.message.edit_text(t, reply_markup=main_menu(obj.from_user.id))) if edit else await obj.answer(t,
+                                                                                                           reply_markup=main_menu(
+                                                                                                             obj.from_user.id))
 
 
 @dp.message(Command("start"))
-async def start(msg: types.Message, state: FSMContext):
-  await log(msg.from_user.id, "start")
-  role = await get_role(msg.from_user.id)
-  if not role:
-    kb = ReplyKeyboardMarkup(
-      resize_keyboard=True,
-      keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]]
-    )
-    await msg.answer("Привет 👋 Выбери роль:", reply_markup=kb)
-    await state.set_state(RoleForm.role)
+async def start(m: types.Message, s: FSMContext):
+  await log(m.from_user.id, "start")
+  r = await get_role(m.from_user.id)
+  if not r:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True,
+                             keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
+    await m.answer(WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb);
+    await s.set_state(RoleForm.role)
   else:
-    await show_main(msg, edit=False)
+    await show_main(m, edit=False, greeting=True)
 
 
 @dp.message(RoleForm.role)
-async def choose_role(msg: types.Message, state: FSMContext):
-  role = "teen" if "подросток" in msg.text.lower() else "parent"
-  await set_role(msg.from_user.id, role)
-  await state.clear()
-  await show_main(msg, edit=False)
+async def choose_role(m: types.Message, s: FSMContext):
+  await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
+  await s.clear();
+  await show_main(m, edit=False, greeting=True)
 
 
 @dp.callback_query(F.data == "navigator")
-async def nav(cb: types.CallbackQuery):
-  await log(cb.from_user.id, "navigator")
+async def nav(c: types.CallbackQuery):
+  await log(c.from_user.id, "navigator")
   kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="😟 Мне нужна помощь", callback_data="help_me")],
     [InlineKeyboardButton(text="🚨 Хочу сообщить о...", callback_data="report")],
     [InlineKeyboardButton(text="❓ Другое", callback_data="other")],
     [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
   ])
-  await cb.message.edit_text("Навигатор помощи:", reply_markup=kb)
+  await c.message.edit_text("Навигатор помощи:", reply_markup=kb)
 
 
 @dp.callback_query(F.data.in_({"help_me", "report", "other"}))
-async def nav_sub(cb: types.CallbackQuery):
-  role = await get_role(cb.from_user.id)
-  with db() as conn:
-    cur = conn.execute("SELECT title, content FROM articles WHERE category=?", (f"{cb.data}_{role}",))
-    rows = cur.fetchall()
-  text = "\n".join(f"{t}: {c}" for t, c in rows) or "Нет информации 😔"
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await cb.message.edit_text(text, reply_markup=kb)
+async def nav_sub(c: types.CallbackQuery):
+  role = await get_role(c.from_user.id)
+  with db() as x: rows = x.execute("SELECT title, content FROM articles WHERE category=?",
+                                   (f"{c.data}_{role}",)).fetchall()
+  t = "\n".join(f"{a}: {b}" for a, b in rows) or "Нет информации 😔"
+  await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]]))
 
 
 @dp.callback_query(F.data == "contacts")
-async def contacts(cb: types.CallbackQuery):
-  await log(cb.from_user.id, "contacts")
-  with db() as conn: rows = conn.execute("SELECT category,name,phone,description FROM contacts").fetchall()
-  text = "\n".join(f"{cat}: {n} - {p} ({d})" for cat, n, p, d in rows) or "Нет контактов 😔"
-  kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
-  await cb.message.edit_text(text, reply_markup=kb)
+async def contacts(c: types.CallbackQuery):
+  await log(c.from_user.id, "contacts")
+  with db() as x: rows = x.execute("SELECT category,name,phone,description FROM contacts").fetchall()
+  t = "\n".join(f"{a}: {b} — {p} ({d})" for a, b, p, d in rows) or "Нет контактов 😔"
+  await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "sos")
-async def sos(cb: types.CallbackQuery):
-  await log(cb.from_user.id, "sos")
-  with db() as conn: row = conn.execute("SELECT text FROM sos_instructions LIMIT 1").fetchone()
-  text = row[0] if row else "🆘 Звоните 112 или в полицию!"
-  kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
-  await cb.message.edit_text(text, reply_markup=kb)
+async def sos(c: types.CallbackQuery):
+  await log(c.from_user.id, "sos")
+  with db() as x: r = x.execute("SELECT text FROM sos_instructions LIMIT 1").fetchone()
+  t = r[0] if r else "🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии."
+  await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "events")
-async def events(cb: types.CallbackQuery):
-  await log(cb.from_user.id, "events")
-  with db() as conn: rows = conn.execute("SELECT title,date,description,link FROM events").fetchall()
-  text = "\n".join(f"{t} ({d}): {desc} - {l}" for t, d, desc, l in rows) or "Нет мероприятий 📅"
-  kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
-  await cb.message.edit_text(text, reply_markup=kb)
+async def events(c: types.CallbackQuery):
+  await log(c.from_user.id, "events")
+  with db() as x: rows = x.execute("SELECT title,date,description,link FROM events").fetchall()
+  t = "\n".join(f"{a} ({d}): {b} — {l}" for a, d, b, l in rows) or "Нет мероприятий 📅"
+  await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "question")
-async def question(cb: types.CallbackQuery, state: FSMContext):
-  await cb.message.edit_text("Напиши вопрос ❓")
-  await state.set_state(QuestionForm.question)
+async def question(c: types.CallbackQuery, s: FSMContext):
+  await c.message.edit_text("Напиши вопрос ❓");
+  await s.set_state(QuestionForm.question)
 
 
 @dp.message(QuestionForm.question)
-async def save_question(msg: types.Message, state: FSMContext):
-  with db() as conn:
-    conn.execute("INSERT INTO questions (user_id,question,timestamp) VALUES (?,?,?)",
-                 (msg.from_user.id, msg.text, datetime.now().isoformat()))
-  await state.clear()
-  await msg.answer("Вопрос отправлен 🚀")
-  await show_main(msg, edit=False)
+async def save_question(m: types.Message, s: FSMContext):
+  with db() as x: x.execute("INSERT INTO questions (user_id,question,timestamp) VALUES (?,?,?)",
+                            (m.from_user.id, m.text, datetime.now().isoformat()))
+  await s.clear();
+  await m.answer("Вопрос отправлен 🚀");
+  await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "tip")
-async def tip(cb: types.CallbackQuery):
-  await log(cb.from_user.id, "tip")
-  with db() as conn: row = conn.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
-  text = row[0] if row else "Совет дня: улыбайся 😊"
-  kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
-  await cb.message.edit_text(text, reply_markup=kb)
+async def tip(c: types.CallbackQuery):
+  await log(c.from_user.id, "tip")
+  with db() as x: r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
+  await c.message.edit_text(r[0] if r else "Совет дня: подыши глубже, это помогает. 😊",
+                            reply_markup=InlineKeyboardMarkup(
+                              inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "poll")
-async def poll(cb: types.CallbackQuery):
-  await cb.message.answer_poll("Что волнует больше?", ["Стресс", "Буллинг", "Цифр. безопасность"], is_anonymous=False)
+async def poll(c: types.CallbackQuery):
+  await c.message.answer_poll("Что волнует больше?", ["Стресс", "Буллинг", "Цифр. безопасность"], is_anonymous=False)
 
 
 @dp.poll_answer()
-async def poll_answer(ans: types.PollAnswer):
-  with db() as conn: conn.execute("INSERT INTO polls (poll_id,results) VALUES (?,?)",
-                                  (ans.poll_id, str(ans.option_ids)))
+async def poll_answer(a: types.PollAnswer):
+  with db() as x: x.execute("INSERT INTO polls (poll_id,results) VALUES (?,?)", (a.poll_id, str(a.option_ids)))
+
+
+@dp.callback_query(F.data == "sub")
+async def sub(c: types.CallbackQuery):
+  with db() as x:
+    r = x.execute("SELECT next_at FROM subs WHERE user_id=?", (c.from_user.id,)).fetchone()
+    if r:
+      x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,)); await c.answer("Подписка отключена")
+    else:
+      x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
+                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat())); await c.answer(
+        "Буду присылать советы раз в день")
+  await show_main(c)
+
+
+@dp.callback_query(F.data == "admin")
+async def admin(c: types.CallbackQuery, s: FSMContext):
+  if c.from_user.id not in ADMIN_IDS: return
+  kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
+    [InlineKeyboardButton(text="🆘 SOS", callback_data="ad_sos")],
+    [InlineKeyboardButton(text="📅 Событие", callback_data="ad_event")],
+    [InlineKeyboardButton(text="📝 Статья", callback_data="ad_article")],
+    [InlineKeyboardButton(text="💡 Совет", callback_data="ad_tip")],
+    [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+  ])
+  await c.message.edit_text("Админ: выбери раздел", reply_markup=kb);
+  await s.set_state(AdminForm.section)
+
+
+@dp.callback_query(F.data.startswith("ad_"))
+async def admin_pick(c: types.CallbackQuery, s: FSMContext):
+  if c.from_user.id not in ADMIN_IDS: return
+  m = {"ad_contacts": "Формат: category|name|+7(XXX)XXX-XX-XX|description", "ad_sos": "Текст SOS",
+       "ad_event": "title|YYYY-MM-DD|description|link", "ad_article": "category|title|content",
+       "ad_tip": "Текст совета"}[c.data]
+  await c.message.edit_text(m);
+  await s.update_data(section=c.data);
+  await s.set_state(AdminForm.payload)
+
+
+@dp.message(AdminForm.payload)
+async def admin_save(m: types.Message, s: FSMContext):
+  if m.from_user.id not in ADMIN_IDS: return
+  d = (await s.get_data())["section"];
+  p = [x.strip() for x in m.text.split('|')]
+  with db() as x:
+    if d == "ad_contacts" and len(p) == 4 and PHONE_RX.fullmatch(p[2]):
+      x.execute("INSERT INTO contacts (category,name,phone,description) VALUES (?,?,?,?)", tuple(p))
+    elif d == "ad_sos":
+      x.execute("DELETE FROM sos_instructions"); x.execute("INSERT INTO sos_instructions (text) VALUES (?)", (m.text,))
+    elif d == "ad_event" and len(p) == 4:
+      x.execute("INSERT INTO events (title,date,description,link) VALUES (?,?,?,?)", tuple(p))
+    elif d == "ad_article" and len(p) == 3:
+      x.execute("INSERT INTO articles (category,title,content) VALUES (?,?,?)", tuple(p))
+    elif d == "ad_tip":
+      x.execute("INSERT INTO tips (text) VALUES (?)", (m.text,))
+    else:
+      await m.answer("Неверный формат"); return
+  await s.clear();
+  await m.answer("Сохранено");
+  await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "back")
-async def back(cb: types.CallbackQuery): await show_main(cb)
+async def back(c: types.CallbackQuery): await show_main(c)
 
 
-async def main(): await dp.start_polling(bot)
+async def notifier():
+  while True:
+    await asyncio.sleep(10)
+    now = datetime.now()
+    with db() as x:
+      for u, n in x.execute("SELECT user_id,next_at FROM subs").fetchall():
+        if now >= datetime.fromisoformat(n):
+          r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
+          try:
+            await bot.send_message(u, r[0] if r else "Совет дня: поддержка рядом — позвони 8-800-2000-122")
+          except:
+            pass
+          x.execute("UPDATE subs SET next_at=? WHERE user_id=?", ((now + timedelta(days=1)).isoformat(), u))
+
+
+async def main():
+  asyncio.create_task(notifier())
+  await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
