@@ -29,6 +29,7 @@ PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 class ThrottlingMiddleware(BaseMiddleware):
   def __init__(self, rate=10):
     self.rate, self.calls = rate, {}
+
   async def __call__(self, handler, event, data):
     u, t = event.from_user.id, asyncio.get_running_loop().time()
     if (p := self.calls.get(u)) and t - p < 1 / self.rate:
@@ -36,29 +37,40 @@ class ThrottlingMiddleware(BaseMiddleware):
     self.calls[u] = t
     return await handler(event, data)
 
+
 dp.message.middleware(ThrottlingMiddleware())
 
 
 class RoleForm(StatesGroup): role = State()
+
+
 class QuestionForm(StatesGroup): question = State()
+
+
 class AdminForm(StatesGroup): section = State(); payload = State()
 
 
 def db(): return sqlite3.connect("cmp_bot.db")
+
 
 def init_db():
   with db() as c:
     x = c.cursor()
     x.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, role TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY, category TEXT, title TEXT, content TEXT)")
-    x.execute("CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY, category TEXT, name TEXT, phone TEXT, description TEXT)")
+    x.execute(
+      "CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY, category TEXT, name TEXT, phone TEXT, description TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS sos_instructions (id INTEGER PRIMARY KEY, text TEXT)")
-    x.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, title TEXT, date TEXT, description TEXT, link TEXT)")
-    x.execute("CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY, user_id INTEGER, question TEXT, timestamp TEXT)")
+    x.execute(
+      "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, title TEXT, date TEXT, description TEXT, link TEXT)")
+    x.execute(
+      "CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY, user_id INTEGER, question TEXT, timestamp TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS tips (id INTEGER PRIMARY KEY, text TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS polls (id INTEGER PRIMARY KEY, poll_id TEXT, results TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp TEXT)")
     x.execute("CREATE TABLE IF NOT EXISTS subs (user_id INTEGER PRIMARY KEY, next_at TEXT)")
+
+
 init_db()
 
 
@@ -67,9 +79,11 @@ async def get_role(u):
     r = c.execute("SELECT role FROM users WHERE user_id=?", (u,)).fetchone()
   return r[0] if r else None
 
+
 async def set_role(u, role):
   with db() as c:
     c.execute("INSERT OR REPLACE INTO users (user_id, role) VALUES (?,?)", (u, role))
+
 
 async def log(u, a):
   with db() as c:
@@ -104,7 +118,8 @@ async def show_main(obj, edit=True, greeting=False):
 async def start(m: types.Message, state: FSMContext):
   await log(m.from_user.id, "start")
   if not (await get_role(m.from_user.id)):
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
+    kb = ReplyKeyboardMarkup(resize_keyboard=True,
+                             keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
     await m.answer(text=WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
     await state.set_state(RoleForm.role)
   else:
@@ -136,7 +151,8 @@ async def nav_sub(c: types.CallbackQuery):
   with db() as x:
     rows = x.execute("SELECT title, content FROM articles WHERE category=?", (f"{c.data}_{role}",)).fetchall()
   t = "\n".join(f"{a}: {b}" for a, b in rows) or "Нет информации 😔"
-  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]]))
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]]))
 
 
 @dp.callback_query(F.data == "contacts")
@@ -145,7 +161,8 @@ async def contacts(c: types.CallbackQuery):
   with db() as x:
     rows = x.execute("SELECT category,name,phone,description FROM contacts").fetchall()
   t = "\n".join(f"{a}: {b} — {p} ({d})" for a, b, p, d in rows) or "Нет контактов 😔"
-  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "sos")
@@ -154,7 +171,8 @@ async def sos(c: types.CallbackQuery):
   with db() as x:
     r = x.execute("SELECT text FROM sos_instructions LIMIT 1").fetchone()
   t = r[0] if r else "🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии."
-  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "events")
@@ -163,7 +181,8 @@ async def events(c: types.CallbackQuery):
   with db() as x:
     rows = x.execute("SELECT title,date,description,link FROM events").fetchall()
   t = "\n".join(f"{a} ({d}): {b} — {l}" for a, d, b, l in rows) or "Нет мероприятий 📅"
-  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "question")
@@ -175,7 +194,8 @@ async def question(c: types.CallbackQuery, state: FSMContext):
 @dp.message(QuestionForm.question)
 async def save_question(m: types.Message, state: FSMContext):
   with db() as x:
-    x.execute("INSERT INTO questions (user_id,question,timestamp) VALUES (?,?,?)", (m.from_user.id, m.text, datetime.now().isoformat()))
+    x.execute("INSERT INTO questions (user_id,question,timestamp) VALUES (?,?,?)",
+              (m.from_user.id, m.text, datetime.now().isoformat()))
   await state.clear()
   await m.answer(text="Вопрос отправлен 🚀")
   await show_main(m, edit=False)
@@ -187,13 +207,15 @@ async def tip(c: types.CallbackQuery):
   with db() as x:
     r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
   t = r[0] if r else "Совет дня: подыши глубже, это помогает. 😊"
-  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "poll")
 async def poll(c: types.CallbackQuery):
   await log(c.from_user.id, "poll")
-  await c.message.edit_text(text="Пока опросов нету 📊", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  await c.message.edit_text(text="Пока опросов нету 📊", reply_markup=InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "sub")
@@ -204,7 +226,8 @@ async def sub(c: types.CallbackQuery):
       x.execute("DELETE FROM subs WHERE user_id=?", (c.from_user.id,))
       await c.answer("Подписка отключена")
     else:
-      x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)", (c.from_user.id, (datetime.now()+timedelta(days=1)).isoformat()))
+      x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
+                (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat()))
       await c.answer("Буду присылать советы раз в день")
   await show_main(c)
 
@@ -290,7 +313,7 @@ async def notifier():
               await bot.send_message(u, "Совет дня: поддержка рядом — позвони 8-800-2000-122")
             except Exception:
               pass
-          x.execute("UPDATE subs SET next_at=? WHERE user_id=?", ((now+timedelta(days=1)).isoformat(), u))
+          x.execute("UPDATE subs SET next_at=? WHERE user_id=?", ((now + timedelta(days=1)).isoformat(), u))
 
 
 async def main():
