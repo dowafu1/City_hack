@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram.fsm.state import StatesGroup, State
 
@@ -10,7 +10,6 @@ from aiogram.fsm.state import StatesGroup, State
 class MockTypes:
   Message = MagicMock
   CallbackQuery = MagicMock
-  PollAnswer = MagicMock
   InlineKeyboardMarkup = MagicMock
   InlineKeyboardButton = MagicMock
   ReplyKeyboardMarkup = MagicMock
@@ -30,13 +29,15 @@ F = MockF()
 class MockFSMContext:
   set_state = AsyncMock
   clear = AsyncMock
+  update_data = AsyncMock
+  get_data = AsyncMock
 
 
 FSMContext = MockFSMContext
 
 RoleForm = type('RoleForm', (StatesGroup,), {'role': State()})
 QuestionForm = type('QuestionForm', (StatesGroup,), {'question': State()})
-AdminForm = type('AdminForm', (StatesGroup,), {'action': State(), 'data': State()})
+AdminForm = type('AdminForm', (StatesGroup,), {'section': State(), 'payload': State()})
 
 from backend.bot import (
   ThrottlingMiddleware,
@@ -58,8 +59,12 @@ from backend.bot import (
   save_question,
   tip,
   poll,
-  poll_answer,
+  sub,
+  admin,
+  admin_pick,
+  admin_save,
   back,
+  notifier,
   ADMIN_IDS
 )
 
@@ -77,6 +82,7 @@ def mock_db():
   cur.execute("CREATE TABLE tips (id INTEGER PRIMARY KEY, text TEXT)")
   cur.execute("CREATE TABLE polls (id INTEGER PRIMARY KEY, poll_id TEXT, results TEXT)")
   cur.execute("CREATE TABLE logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp TEXT)")
+  cur.execute("CREATE TABLE subs (user_id INTEGER PRIMARY KEY, next_at TEXT)")
   conn.commit()
   with patch('backend.bot.db', return_value=conn):
     yield conn
@@ -89,7 +95,7 @@ async def test_throttling_middleware_allow():
   event = MagicMock()
   event.from_user = MagicMock(id=1)
   data = {}
-  with patch('asyncio.get_event_loop') as loop_mock:
+  with patch('asyncio.get_running_loop') as loop_mock:
     loop = MagicMock()
     loop.time.return_value = 0
     loop_mock.return_value = loop
@@ -104,7 +110,7 @@ async def test_throttling_middleware_throttle():
   event = MagicMock()
   event.from_user = MagicMock(id=1)
   data = {}
-  with patch('asyncio.get_event_loop') as loop_mock:
+  with patch('asyncio.get_running_loop') as loop_mock:
     loop = MagicMock()
     loop.time.side_effect = [0, 0.5]
     loop_mock.return_value = loop
@@ -121,6 +127,7 @@ def test_init_db(mock_db):
   tables = [row[0] for row in cur.fetchall()]
   assert 'users' in tables
   assert 'articles' in tables
+  assert 'subs' in tables
 
 
 @pytest.mark.asyncio
@@ -155,14 +162,14 @@ async def test_log(mock_db):
 
 def test_main_menu_non_admin():
   kb = main_menu(1)
-  assert len(kb.inline_keyboard) == 7
+  assert len(kb.inline_keyboard) == 8
   assert kb.inline_keyboard[0][0].text == "🧭 Навигатор помощи"
 
 
 def test_main_menu_admin():
   kb = main_menu(123456789)
-  assert len(kb.inline_keyboard) == 8
-  assert kb.inline_keyboard[7][0].text == "⚙️ Админ панель"
+  assert len(kb.inline_keyboard) == 9
+  assert kb.inline_keyboard[8][0].text == "⚙️ Админ панель"
 
 
 @pytest.mark.asyncio
@@ -188,7 +195,12 @@ async def test_show_main_greeting():
   msg = MagicMock()
   msg.answer = AsyncMock()
   await show_main(msg, edit=False, greeting=True)
-  msg.answer.assert_called_with("Добро пожаловать в ЦМП бот Томской области! 🌟\n\nВыберите действие:", reply_markup=ANY)
+  msg.answer.assert_called_with(
+      "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
+      "🔹 Помогу найти контакты служб\n"
+      "🔹 Дам советы и инструкции\n"
+      "🔹 Расскажу о мероприятиях\n\n"
+      "✨ Всё конфиденциально и без лишних формальностей!\n\nВыберите действие:", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -200,7 +212,12 @@ async def test_start_no_role():
   state.set_state = AsyncMock()
   with patch('backend.bot.get_role', return_value=None), patch('backend.bot.log'):
     await start(msg, state)
-  msg.answer.assert_called_with("Привет 👋 Выбери роль:", reply_markup=ANY)
+  msg.answer.assert_called_with(
+      "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
+      "🔹 Помогу найти контакты служб\n"
+      "🔹 Дам советы и инструкции\n"
+      "🔹 Расскажу о мероприятиях\n\n"
+      "✨ Всё конфиденциально и без лишних формальностей!\n\nВыбери роль:", reply_markup=ANY)
   state.set_state.assert_called_with(RoleForm.role)
 
 
@@ -212,7 +229,7 @@ async def test_start_with_role():
   with patch('backend.bot.get_role', return_value='teen'), patch('backend.bot.log'), patch(
       'backend.bot.show_main') as mock_show:
     await start(msg, state)
-  mock_show.assert_called_with(msg, edit=False)
+  mock_show.assert_called_with(msg, edit=False, greeting=True)
 
 
 @pytest.mark.asyncio
@@ -287,11 +304,11 @@ async def test_contacts_with_data(mock_db):
   cb.from_user = MagicMock(id=1)
   cb.message = MagicMock()
   cb.message.edit_text = AsyncMock()
-  mock_db.execute("INSERT INTO contacts VALUES (1, 'cat', 'name', 'phone', 'desc')")
+  mock_db.execute("INSERT INTO contacts VALUES (1, 'cat', 'name', '+7(123)456-78-90', 'desc')")
   mock_db.commit()
   with patch('backend.bot.log'):
     await contacts(cb)
-  cb.message.edit_text.assert_called_with("cat: name - phone (desc)", reply_markup=ANY)
+  cb.message.edit_text.assert_called_with("cat: name — +7(123)456-78-90 (desc)", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -326,7 +343,7 @@ async def test_sos_no_data():
   cb.message.edit_text = AsyncMock()
   with patch('backend.bot.log'):
     await sos(cb)
-  cb.message.edit_text.assert_called_with("🆘 Звоните 112 или в полицию!", reply_markup=ANY)
+  cb.message.edit_text.assert_called_with("🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии.", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -339,7 +356,7 @@ async def test_events_with_data(mock_db):
   mock_db.commit()
   with patch('backend.bot.log'):
     await events(cb)
-  cb.message.edit_text.assert_called_with("title (date): desc - link", reply_markup=ANY)
+  cb.message.edit_text.assert_called_with("title (desc): date — link", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
@@ -404,30 +421,158 @@ async def test_tip_no_data():
   cb.message.edit_text = AsyncMock()
   with patch('backend.bot.log'):
     await tip(cb)
-  cb.message.edit_text.assert_called_with("Совет дня: улыбайся 😊", reply_markup=ANY)
+  cb.message.edit_text.assert_called_with("Совет дня: подыши глубже, это помогает. 😊", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
 async def test_poll():
   cb = MagicMock()
+  cb.from_user = MagicMock(id=1)
   cb.message = MagicMock()
-  cb.message.answer_poll = AsyncMock()
-  await poll(cb)
-  cb.message.answer_poll.assert_called_with("Что волнует больше?", ["Стресс", "Буллинг", "Цифр. безопасность"],
-                                            is_anonymous=False)
+  cb.message.edit_text = AsyncMock()
+  with patch('backend.bot.log'):
+    await poll(cb)
+  cb.message.edit_text.assert_called_with("Пока опросов нету 📊", reply_markup=ANY)
 
 
 @pytest.mark.asyncio
-async def test_poll_answer(mock_db):
-  ans = MagicMock()
-  ans.poll_id = "poll1"
-  ans.option_ids = [0, 1]
-  await poll_answer(ans)
+async def test_sub_subscribe(mock_db):
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=1)
+  cb.answer = AsyncMock()
+  with patch('backend.bot.show_main') as mock_show, patch('datetime.datetime') as mock_dt:
+    mock_now = datetime(2023, 1, 1)
+    mock_dt.now.return_value = mock_now
+    await sub(cb)
+  cb.answer.assert_called_with("Буду присылать советы раз в день")
+  mock_show.assert_called_with(cb)
   cur = mock_db.cursor()
-  cur.execute("SELECT poll_id, results FROM polls")
-  row = cur.fetchone()
-  assert row[0] == "poll1"
-  assert row[1] == "[0, 1]"
+  cur.execute("SELECT next_at FROM subs WHERE user_id=1")
+  assert cur.fetchone()[0] == (mock_now + timedelta(days=1)).isoformat()
+
+
+@pytest.mark.asyncio
+async def test_sub_unsubscribe(mock_db):
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=1)
+  cb.answer = AsyncMock()
+  mock_db.execute("INSERT INTO subs VALUES (1, '2023-01-01T00:00:00')")
+  mock_db.commit()
+  with patch('backend.bot.show_main') as mock_show:
+    await sub(cb)
+  cb.answer.assert_called_with("Подписка отключена")
+  mock_show.assert_called_with(cb)
+  cur = mock_db.cursor()
+  cur.execute("SELECT * FROM subs WHERE user_id=1")
+  assert cur.fetchone() is None
+
+
+@pytest.mark.asyncio
+async def test_admin_non_admin():
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=999)
+  state = MagicMock()
+  await admin(cb, state)
+  cb.message.edit_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin():
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=123456789)
+  cb.message = MagicMock()
+  cb.message.edit_text = AsyncMock()
+  state = MagicMock()
+  state.set_state = AsyncMock()
+  await admin(cb, state)
+  cb.message.edit_text.assert_called_with("Админ: выбери раздел", reply_markup=ANY)
+  state.set_state.assert_called_with(AdminForm.section)
+
+
+@pytest.mark.asyncio
+async def test_admin_pick_non_admin():
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=999)
+  state = MagicMock()
+  await admin_pick(cb, state)
+  cb.message.edit_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_pick_contacts():
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=123456789)
+  cb.data = "ad_contacts"
+  cb.message = MagicMock()
+  cb.message.edit_text = AsyncMock()
+  state = MagicMock()
+  state.update_data = AsyncMock()
+  state.set_state = AsyncMock()
+  await admin_pick(cb, state)
+  cb.message.edit_text.assert_called_with("Формат: category|name|+7(XXX)XXX-XX-XX|description")
+  state.update_data.assert_called_with(section="ad_contacts")
+  state.set_state.assert_called_with(AdminForm.payload)
+
+
+@pytest.mark.asyncio
+async def test_admin_save_non_admin():
+  msg = MagicMock()
+  msg.from_user = MagicMock(id=999)
+  state = MagicMock()
+  await admin_save(msg, state)
+  msg.answer.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_save_contacts_valid(mock_db):
+  msg = MagicMock()
+  msg.from_user = MagicMock(id=123456789)
+  msg.text = "cat|name|+7(123)456-78-90|desc"
+  msg.answer = AsyncMock()
+  state = MagicMock()
+  state.get_data = AsyncMock(return_value={"section": "ad_contacts"})
+  state.clear = AsyncMock()
+  with patch('backend.bot.show_main') as mock_show:
+    await admin_save(msg, state)
+  msg.answer.assert_called_with("Сохранено")
+  state.clear.assert_called()
+  mock_show.assert_called_with(msg, edit=False)
+  cur = mock_db.cursor()
+  cur.execute("SELECT category, name, phone, description FROM contacts")
+  assert cur.fetchone() == ("cat", "name", "+7(123)456-78-90", "desc")
+
+
+@pytest.mark.asyncio
+async def test_admin_save_contacts_invalid(mock_db):
+  msg = MagicMock()
+  msg.from_user = MagicMock(id=123456789)
+  msg.text = "invalid"
+  msg.answer = AsyncMock()
+  state = MagicMock()
+  state.get_data = AsyncMock(return_value={"section": "ad_contacts"})
+  state.clear = AsyncMock()
+  await admin_save(msg, state)
+  msg.answer.assert_called_with("Неверный формат")
+  state.clear.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_save_sos(mock_db):
+  msg = MagicMock()
+  msg.from_user = MagicMock(id=123456789)
+  msg.text = "New SOS text"
+  msg.answer = AsyncMock()
+  state = MagicMock()
+  state.get_data = AsyncMock(return_value={"section": "ad_sos"})
+  state.clear = AsyncMock()
+  with patch('backend.bot.show_main') as mock_show:
+    await admin_save(msg, state)
+  msg.answer.assert_called_with("Сохранено")
+  state.clear.assert_called()
+  mock_show.assert_called_with(msg, edit=False)
+  cur = mock_db.cursor()
+  cur.execute("SELECT text FROM sos_instructions")
+  assert cur.fetchone()[0] == "New SOS text"
 
 
 @pytest.mark.asyncio
@@ -436,3 +581,27 @@ async def test_back():
   with patch('backend.bot.show_main') as mock_show:
     await back(cb)
   mock_show.assert_called_with(cb)
+
+
+@pytest.mark.asyncio
+async def test_notifier_with_sub_and_tip(mock_db):
+  mock_bot = MagicMock()
+  mock_bot.send_message = AsyncMock()
+  with patch('backend.bot.bot', mock_bot), patch('asyncio.sleep', new_callable=AsyncMock), patch('datetime.datetime') as mock_dt:
+    mock_now = datetime(2023, 1, 1)
+    mock_dt.now.return_value = mock_now
+    mock_dt.fromisoformat.side_effect = datetime.fromisoformat
+
+    mock_db.execute("INSERT INTO subs VALUES (1, '2023-01-01T00:00:00')")
+    mock_db.execute("INSERT INTO tips VALUES (1, 'Tip text')")
+    mock_db.commit()
+
+    notifier_task = asyncio.create_task(notifier())
+    await asyncio.sleep(0.1)
+
+    mock_bot.send_message.assert_called_with(1, "Tip text")
+    cur = mock_db.cursor()
+    cur.execute("SELECT next_at FROM subs WHERE user_id=1")
+    assert cur.fetchone()[0] == (mock_now + timedelta(days=1)).isoformat()
+
+    notifier_task.cancel()
