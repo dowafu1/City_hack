@@ -214,7 +214,8 @@ async def poll(c: types.CallbackQuery):
 
 @dp.poll_answer()
 async def poll_answer(a: types.PollAnswer):
-  with db() as x: x.execute("INSERT INTO polls (poll_id,results) VALUES (?,?)", (a.poll_id, str(a.option_ids)))
+    with db() as x:
+        x.execute("INSERT INTO polls (poll_id,results) VALUES (?,?)", (a.poll_id, str(a.option_ids)))
 
 
 @dp.callback_query(F.data == "sub")
