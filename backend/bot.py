@@ -44,7 +44,7 @@ class QuestionForm(StatesGroup): question = State()
 class AdminForm(StatesGroup): section = State(); payload = State()
 
 
-def db(): return sqlite3.connect("cmpbot.db")
+def db(): return sqlite3.connect("cmp_bot.db")
 
 def init_db():
   with db() as c:
@@ -103,7 +103,7 @@ async def show_main(obj, edit=True, greeting=False):
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
   await log(m.from_user.id, "start")
-  if not (r := await get_role(m.from_user.id)):
+  if not (await get_role(m.from_user.id)):
     kb = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
     await m.answer(text=WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
     await state.set_state(RoleForm.role)
@@ -186,7 +186,8 @@ async def tip(c: types.CallbackQuery):
   await log(c.from_user.id, "tip")
   with db() as x:
     r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
-  await c.message.edit_text(text=r[0] if r else "Совет дня: подыши глубже, это помогает. 😊", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
+  t = r[0] if r else "Совет дня: подыши глубже, это помогает. 😊"
+  await c.message.edit_text(text=t, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]]))
 
 
 @dp.callback_query(F.data == "poll")
@@ -278,11 +279,17 @@ async def notifier():
     with db() as x:
       for u, n in x.execute("SELECT user_id,next_at FROM subs").fetchall():
         if now >= datetime.fromisoformat(n):
-          r = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
-          try:
-            await bot.send_message(u, r[0] if r else "Совет дня: поддержка рядом — позвони 8-800-2000-122")
-          except:
-            pass
+          tip_text = x.execute("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1").fetchone()
+          if tip_text:
+            try:
+              await bot.send_message(u, tip_text[0])
+            except Exception:
+              pass
+          else:
+            try:
+              await bot.send_message(u, "Совет дня: поддержка рядом — позвони 8-800-2000-122")
+            except Exception:
+              pass
           x.execute("UPDATE subs SET next_at=? WHERE user_id=?", ((now+timedelta(days=1)).isoformat(), u))
 
 
