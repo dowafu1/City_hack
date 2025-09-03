@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import sqlite3
 from datetime import datetime
 
+from aiogram.fsm.state import StatesGroup, State
+
 class MockTypes:
     Message = MagicMock
     CallbackQuery = MagicMock
@@ -26,18 +28,9 @@ class MockFSMContext:
 
 FSMContext = MockFSMContext
 
-class MockStatesGroup:
-    pass
-
-RoleForm = MockStatesGroup
-RoleForm.role = 'role'
-
-QuestionForm = MockStatesGroup
-QuestionForm.question = 'question'
-
-AdminForm = MockStatesGroup
-AdminForm.action = 'action'
-AdminForm.data = 'data'
+RoleForm = type('RoleForm', (StatesGroup,), {'role': State()})
+QuestionForm = type('QuestionForm', (StatesGroup,), {'question': State()})
+AdminForm = type('AdminForm', (StatesGroup,), {'action': State(), 'data': State()})
 
 from backend.bot import (
     ThrottlingMiddleware,
@@ -78,7 +71,7 @@ def mock_db():
     cur.execute("CREATE TABLE polls (id INTEGER PRIMARY KEY, poll_id TEXT, results TEXT)")
     cur.execute("CREATE TABLE logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp TEXT)")
     conn.commit()
-    with patch('bot.db', return_value=conn):
+    with patch('backend.bot.db', return_value=conn):
         yield conn
 
 @pytest.mark.asyncio
@@ -88,8 +81,10 @@ async def test_throttling_middleware_allow():
     event = MagicMock()
     event.from_user = MagicMock(id=1)
     data = {}
-    with patch('asyncio.get_event_loop') as loop:
+    with patch('asyncio.get_event_loop') as loop_mock:
+        loop = MagicMock()
         loop.time.return_value = 0
+        loop_mock.return_value = loop
         await middleware(handler, event, data)
     handler.assert_called_once_with(event, data)
 
@@ -100,12 +95,13 @@ async def test_throttling_middleware_throttle():
     event = MagicMock()
     event.from_user = MagicMock(id=1)
     data = {}
-    with patch('asyncio.get_event_loop') as loop:
-        loop.time.return_value = 0
+    with patch('asyncio.get_event_loop') as loop_mock:
+        loop = MagicMock()
+        loop.time.side_effect = [0, 0.5]
+        loop_mock.return_value = loop
         await middleware(handler, event, data)
         handler.assert_called_once()
         handler.reset_mock()
-        loop.time.return_value = 0.5
         await middleware(handler, event, data)
         handler.assert_not_called()
 
@@ -115,7 +111,6 @@ def test_init_db(mock_db):
     tables = [row[0] for row in cur.fetchall()]
     assert 'users' in tables
     assert 'articles' in tables
-
 
 @pytest.mark.asyncio
 async def test_get_role_exists(mock_db):
@@ -183,7 +178,7 @@ async def test_start_no_role():
     msg.answer = AsyncMock()
     state = MagicMock()
     state.set_state = AsyncMock()
-    with patch('bot.get_role', return_value=None), patch('bot.log'):
+    with patch('backend.bot.get_role', return_value=None), patch('backend.bot.log'):
         await start(msg, state)
     msg.answer.assert_called_with("Привет 👋 Выбери роль:", reply_markup=ANY)
     state.set_state.assert_called_with(RoleForm.role)
@@ -193,7 +188,7 @@ async def test_start_with_role():
     msg = MagicMock()
     msg.from_user = MagicMock(id=1)
     state = MagicMock()
-    with patch('bot.get_role', return_value='teen'), patch('bot.log'), patch('bot.show_main') as mock_show:
+    with patch('backend.bot.get_role', return_value='teen'), patch('backend.bot.log'), patch('backend.bot.show_main') as mock_show:
         await start(msg, state)
     mock_show.assert_called_with(msg, edit=False)
 
@@ -204,7 +199,7 @@ async def test_choose_role_teen():
     msg.text = "Я подросток"
     state = MagicMock()
     state.clear = AsyncMock()
-    with patch('bot.set_role') as mock_set, patch('bot.show_main') as mock_show:
+    with patch('backend.bot.set_role') as mock_set, patch('backend.bot.show_main') as mock_show:
         await choose_role(msg, state)
     mock_set.assert_called_with(1, "teen")
     state.clear.assert_called()
@@ -217,7 +212,7 @@ async def test_choose_role_parent():
     msg.text = "Я родитель"
     state = MagicMock()
     state.clear = AsyncMock()
-    with patch('bot.set_role') as mock_set, patch('bot.show_main') as mock_show:
+    with patch('backend.bot.set_role') as mock_set, patch('backend.bot.show_main') as mock_show:
         await choose_role(msg, state)
     mock_set.assert_called_with(1, "parent")
     state.clear.assert_called()
@@ -229,7 +224,7 @@ async def test_nav():
     cb.from_user = MagicMock(id=1)
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.log') as mock_log:
+    with patch('backend.bot.log') as mock_log:
         await nav(cb)
     mock_log.assert_called_with(1, "navigator")
     cb.message.edit_text.assert_called_with("Навигатор помощи:", reply_markup=ANY)
@@ -243,7 +238,7 @@ async def test_nav_sub_with_data(mock_db):
     cb.message.edit_text = AsyncMock()
     mock_db.execute("INSERT INTO articles VALUES (1, 'help_me_teen', 'Title', 'Content')")
     mock_db.commit()
-    with patch('bot.get_role', return_value='teen'):
+    with patch('backend.bot.get_role', return_value='teen'):
         await nav_sub(cb)
     cb.message.edit_text.assert_called_with("Title: Content", reply_markup=ANY)
 
@@ -254,7 +249,7 @@ async def test_nav_sub_no_data():
     cb.data = "help_me"
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.get_role', return_value='teen'):
+    with patch('backend.bot.get_role', return_value='teen'):
         await nav_sub(cb)
     cb.message.edit_text.assert_called_with("Нет информации 😔", reply_markup=ANY)
 
@@ -266,7 +261,7 @@ async def test_contacts_with_data(mock_db):
     cb.message.edit_text = AsyncMock()
     mock_db.execute("INSERT INTO contacts VALUES (1, 'cat', 'name', 'phone', 'desc')")
     mock_db.commit()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await contacts(cb)
     cb.message.edit_text.assert_called_with("cat: name - phone (desc)", reply_markup=ANY)
 
@@ -276,7 +271,7 @@ async def test_contacts_no_data():
     cb.from_user = MagicMock(id=1)
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await contacts(cb)
     cb.message.edit_text.assert_called_with("Нет контактов 😔", reply_markup=ANY)
 
@@ -288,7 +283,7 @@ async def test_sos_with_data(mock_db):
     cb.message.edit_text = AsyncMock()
     mock_db.execute("INSERT INTO sos_instructions VALUES (1, 'SOS text')")
     mock_db.commit()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await sos(cb)
     cb.message.edit_text.assert_called_with("SOS text", reply_markup=ANY)
 
@@ -298,7 +293,7 @@ async def test_sos_no_data():
     cb.from_user = MagicMock(id=1)
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await sos(cb)
     cb.message.edit_text.assert_called_with("🆘 Звоните 112 или в полицию!", reply_markup=ANY)
 
@@ -310,7 +305,7 @@ async def test_events_with_data(mock_db):
     cb.message.edit_text = AsyncMock()
     mock_db.execute("INSERT INTO events VALUES (1, 'title', 'date', 'desc', 'link')")
     mock_db.commit()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await events(cb)
     cb.message.edit_text.assert_called_with("title (date): desc - link", reply_markup=ANY)
 
@@ -320,7 +315,7 @@ async def test_events_no_data():
     cb.from_user = MagicMock(id=1)
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await events(cb)
     cb.message.edit_text.assert_called_with("Нет мероприятий 📅", reply_markup=ANY)
 
@@ -343,7 +338,7 @@ async def test_save_question(mock_db):
     msg.answer = AsyncMock()
     state = MagicMock()
     state.clear = AsyncMock()
-    with patch('bot.show_main') as mock_show:
+    with patch('backend.bot.show_main') as mock_show:
         await save_question(msg, state)
     state.clear.assert_called()
     msg.answer.assert_called_with("Вопрос отправлен 🚀")
@@ -360,7 +355,7 @@ async def test_tip_with_data(mock_db):
     cb.message.edit_text = AsyncMock()
     mock_db.execute("INSERT INTO tips VALUES (1, 'Tip text')")
     mock_db.commit()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await tip(cb)
     cb.message.edit_text.assert_called_with("Tip text", reply_markup=ANY)
 
@@ -370,7 +365,7 @@ async def test_tip_no_data():
     cb.from_user = MagicMock(id=1)
     cb.message = MagicMock()
     cb.message.edit_text = AsyncMock()
-    with patch('bot.log'):
+    with patch('backend.bot.log'):
         await tip(cb)
     cb.message.edit_text.assert_called_with("Совет дня: улыбайся 😊", reply_markup=ANY)
 
@@ -397,6 +392,6 @@ async def test_poll_answer(mock_db):
 @pytest.mark.asyncio
 async def test_back():
     cb = MagicMock()
-    with patch('bot.show_main') as mock_show:
+    with patch('backend.bot.show_main') as mock_show:
         await back(cb)
     mock_show.assert_called_with(cb)
