@@ -243,7 +243,6 @@ async def sub(c: types.CallbackQuery):
       x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
                 (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat()))
       await c.answer("Буду присылать советы раз в день")
-  # используем edit=False, чтобы избежать ошибки "message is not modified"
   await show_main(c, edit=False)
 
 
