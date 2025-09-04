@@ -10,6 +10,7 @@ async def recognize_init():
 
     return pipe
 
+
 async def recognize(file_path: str, pipe: AutomaticSpeechRecognitionPipeline) -> str:
     # Читаем аудио (Whisper ожидает WAV или другой формат, но soundfile конвертирует)
     data, samplerate = sf.read(file_path)
