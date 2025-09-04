@@ -177,7 +177,7 @@ async def init_db():
             )
         ''')
 
-        # 💬 История чата (новая таблица)
+        # 💬 История чата (только для нужных действий)
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS chat_history (
                 id SERIAL PRIMARY KEY,
@@ -188,7 +188,7 @@ async def init_db():
             )
         ''')
 
-        # Индекс для производительности
+        # Индекс
         await conn.execute('''
             CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)
         ''')
@@ -232,7 +232,7 @@ async def log_action(user_id: int, action: str):
 
 # 💬 НОВОЕ: Функции для работы с историей чата
 async def add_chat_message(chat_id: int, role: str, content: str):
-    """Добавляет сообщение в историю чата"""
+    """Добавляет сообщение в историю чата (только для нужных действий)"""
     if role not in ("user", "ai"):
         raise ValueError("Role must be 'user' or 'ai'")
     conn = await get_db()
@@ -299,10 +299,11 @@ async def show_main(obj, edit=True, greeting=False):
 
 
 # === Обработчики ===
+
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await log_action(m.from_user.id, "start")
-    await add_chat_message(m.chat.id, "user", "/start")  # 📝 Логируем
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     role = await get_role(m.from_user.id)
     if not role:
@@ -321,9 +322,7 @@ async def choose_role(m: types.Message, state: FSMContext):
     role = "teen" if "подросток" in m.text.lower() else "parent"
     await set_role(m.from_user.id, role)
     await state.clear()
-    await add_chat_message(m.chat.id, "user", m.text)
-    await add_chat_message(m.chat.id, "ai", "Роль выбрана.")
-
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
     await m.reply("Роль выбрана.", reply_markup=ReplyKeyboardRemove())
     await show_main(m, edit=False)
 
@@ -331,7 +330,7 @@ async def choose_role(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "change_role")
 async def change_role(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "change_role")
-    await add_chat_message(c.message.chat.id, "user", "change_role")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     await c.message.delete()
     kb = ReplyKeyboardMarkup(
@@ -345,7 +344,7 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "navigator")
 async def nav(c: types.CallbackQuery):
     await log_action(c.from_user.id, "navigator")
-    await add_chat_message(c.message.chat.id, "user", "navigator")
+    await add_chat_message(c.message.chat.id, "user", "navigator")  # ✅ ЛОГИРУЕМ
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="😟 Мне нужна помощь", callback_data="help_me")],
@@ -368,7 +367,7 @@ async def nav_sub(c: types.CallbackQuery):
     finally:
         await conn.close()
 
-    await add_chat_message(c.message.chat.id, "ai", t)
+    await add_chat_message(c.message.chat.id, "ai", t)  # ✅ Ответ логируем
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -380,7 +379,7 @@ async def nav_sub(c: types.CallbackQuery):
 @dp.callback_query(F.data == "contacts")
 async def contacts(c: types.CallbackQuery):
     await log_action(c.from_user.id, "contacts")
-    await add_chat_message(c.message.chat.id, "user", "contacts")
+    await add_chat_message(c.message.chat.id, "user", "contacts")  # ✅ ЛОГИРУЕМ
 
     conn = await get_db()
     try:
@@ -389,7 +388,7 @@ async def contacts(c: types.CallbackQuery):
     finally:
         await conn.close()
 
-    await add_chat_message(c.message.chat.id, "ai", t)
+    await add_chat_message(c.message.chat.id, "ai", t)  # ✅ Ответ логируем
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -401,7 +400,7 @@ async def contacts(c: types.CallbackQuery):
 @dp.callback_query(F.data == "sos")
 async def sos(c: types.CallbackQuery):
     await log_action(c.from_user.id, "sos")
-    await add_chat_message(c.message.chat.id, "user", "sos")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     conn = await get_db()
     try:
@@ -410,7 +409,6 @@ async def sos(c: types.CallbackQuery):
     finally:
         await conn.close()
 
-    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -422,7 +420,7 @@ async def sos(c: types.CallbackQuery):
 @dp.callback_query(F.data == "events")
 async def events(c: types.CallbackQuery):
     await log_action(c.from_user.id, "events")
-    await add_chat_message(c.message.chat.id, "user", "events")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     conn = await get_db()
     try:
@@ -431,7 +429,6 @@ async def events(c: types.CallbackQuery):
     finally:
         await conn.close()
 
-    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -443,7 +440,7 @@ async def events(c: types.CallbackQuery):
 @dp.callback_query(F.data == "question")
 async def question(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "question")
-    await add_chat_message(c.message.chat.id, "user", "question")
+    await add_chat_message(c.message.chat.id, "user", "question")  # ✅ ЛОГИРУЕМ
 
     await c.message.edit_text(text="Напиши вопрос ❓")
     await state.set_state(QuestionForm.question)
@@ -451,7 +448,7 @@ async def question(c: types.CallbackQuery, state: FSMContext):
 
 @dp.message(QuestionForm.question)
 async def save_question(m: types.Message, state: FSMContext):
-    await add_chat_message(m.chat.id, "user", m.text)
+    await add_chat_message(m.chat.id, "user", m.text)  # ✅ Логируем вопрос
 
     conn = await get_db()
     try:
@@ -463,15 +460,16 @@ async def save_question(m: types.Message, state: FSMContext):
         await conn.close()
 
     await state.clear()
-    await add_chat_message(m.chat.id, "ai", "Вопрос отправлен 🚀")
-    await m.answer(text="Вопрос отправлен 🚀")
+    response = "Вопрос отправлен 🚀"
+    await m.answer(text=response)
+    await add_chat_message(m.chat.id, "ai", response)  # ✅ Логируем ответ
     await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "tip")
 async def tip(c: types.CallbackQuery):
     await log_action(c.from_user.id, "tip")
-    await add_chat_message(c.message.chat.id, "user", "tip")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     conn = await get_db()
     try:
@@ -480,7 +478,6 @@ async def tip(c: types.CallbackQuery):
     finally:
         await conn.close()
 
-    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -492,12 +489,10 @@ async def tip(c: types.CallbackQuery):
 @dp.callback_query(F.data == "poll")
 async def poll(c: types.CallbackQuery):
     await log_action(c.from_user.id, "poll")
-    await add_chat_message(c.message.chat.id, "user", "poll")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
-    t = "Пока опросов нету 📊"
-    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
-        text=t,
+        text="Пока опросов нету 📊",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
         ])
@@ -506,7 +501,7 @@ async def poll(c: types.CallbackQuery):
 
 @dp.callback_query(F.data == "sub")
 async def sub(c: types.CallbackQuery):
-    await add_chat_message(c.message.chat.id, "user", "sub")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     conn = await get_db()
     try:
@@ -514,7 +509,6 @@ async def sub(c: types.CallbackQuery):
         if row:
             await conn.execute("DELETE FROM subs WHERE user_id = $1", c.from_user.id)
             await c.answer("Подписка отключена")
-            await add_chat_message(c.message.chat.id, "ai", "Подписка отключена")
         else:
             next_at = (datetime.now() + timedelta(days=1)).isoformat()
             await conn.execute(
@@ -522,7 +516,6 @@ async def sub(c: types.CallbackQuery):
                 c.from_user.id, next_at
             )
             await c.answer("Буду присылать советы раз в день")
-            await add_chat_message(c.message.chat.id, "ai", "Подписка активирована")
     finally:
         await conn.close()
 
@@ -536,7 +529,7 @@ async def admin(c: types.CallbackQuery, state: FSMContext):
         return
 
     await log_action(c.from_user.id, "admin")
-    await add_chat_message(c.message.chat.id, "user", "admin")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
@@ -556,7 +549,7 @@ async def admin_pick(c: types.CallbackQuery, state: FSMContext):
         await c.answer("Доступ запрещён", show_alert=True)
         return
 
-    await add_chat_message(c.message.chat.id, "user", c.data)
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
 
     messages = {
         "ad_contacts": "Формат: category|name|+7(XXX)XXX-XX-XX|description",
@@ -580,8 +573,6 @@ async def admin_save(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS:
         await m.answer("Доступ запрещён")
         return
-
-    await add_chat_message(m.chat.id, "user", m.text)
 
     data = await state.get_data()
     section = data["section"]
@@ -614,7 +605,6 @@ async def admin_save(m: types.Message, state: FSMContext):
             return
 
         await m.answer("✅ Сохранено")
-        await add_chat_message(m.chat.id, "ai", "✅ Сохранено")
         await show_main(m, edit=False)
     finally:
         await conn.close()
@@ -623,7 +613,7 @@ async def admin_save(m: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "back")
 async def back(c: types.CallbackQuery):
-    await add_chat_message(c.message.chat.id, "user", "back")
+    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
     await show_main(c)
 
 
@@ -642,7 +632,6 @@ async def notifier():
                     text = tip_row['text'] if tip_row else "Совет дня: поддержка рядом — позвони 8-800-2000-122"
                     try:
                         await bot.send_message(user_id, text)
-                        await add_chat_message(user_id, "ai", text)  # 📝 Логируем отправку
                     except Exception:
                         pass
                     new_next = (now + timedelta(days=1)).isoformat()
@@ -655,7 +644,7 @@ async def notifier():
 async def main():
     await init_db()
     asyncio.create_task(notifier())
-    print("✅ Бот запущен. История чата включена.")
+    print("✅ Бот запущен. Логирование только для: contacts, question, navigator.")
     await dp.start_polling(bot)
 
 
