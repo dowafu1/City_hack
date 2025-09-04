@@ -6,36 +6,27 @@ from dotenv import load_dotenv
 import asyncio
 
 load_dotenv()
-sessions = {}
 
 
-async def make_chat(prompt: str, user_id: int):
-    giga = GigaChat(
-        credentials=os.getenv('SBER_AUTH_TOKEN'),
-        verify_ssl_certs=False,
-    )
-
-    if user_id not in sessions:
-        messages = [
-            SystemMessage(
-                content="Ты эмпатичный бот-психолог, который помогает пользователю решить его проблемы."
-            )
-        ]
-    else:
-        messages = sessions[user_id]
+async def make_chat(client: GigaChat,
+                    prompt: str,
+                    messages: list,
+                    preset_prompt="Ты эмпатичный бот-психолог, "
+                                  "который помогает пользователю решить его проблемы.") -> str:
+    if not bool(messages):
+        messages.append(SystemMessage(content=preset_prompt))
 
     messages.append(HumanMessage(content=prompt))
-    res = giga.invoke(messages)
+    res = client.invoke(messages)
     messages.append(res)
-
-    sessions[user_id] = messages
 
     return res.content
 
 
 async def main():
-    print(await make_chat('Привет. Как дела?', 123))
-    print(sessions)
+    print(await make_chat(GigaChat(credentials=os.getenv('SBER_AUTH_TOKEN'), verify_ssl_certs=False),
+                          'Привет, я чувствую себя ужасно. Что мне делать?',
+                          []))
 
 
 if __name__ == '__main__':
