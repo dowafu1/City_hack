@@ -1,5 +1,3 @@
-import asyncio
-
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_gigachat.chat_models import GigaChat
 
@@ -29,4 +27,6 @@ async def main():
 
 
 if __name__ == '__main__':
+    import asyncio
+
     asyncio.run(main())
