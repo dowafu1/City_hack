@@ -7,7 +7,7 @@ from langchain_gigachat.chat_models import GigaChat
 async def make_chat(client: GigaChat,
                     prompt: str,
                     messages: list,
-                    preset_prompt="Ты эмпатичный бот-психолог, который помогает пользователю решить его проблемы. "
+                    preset_prompt="Ты эмпатичный психолог-профессионал, который помогает клиенту решить его проблемы. "
                                   "Отвечай только на языке сообщения пользователя.") -> str:
     if not bool(messages):
         messages.append(SystemMessage(content=preset_prompt))
