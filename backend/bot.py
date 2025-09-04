@@ -121,7 +121,6 @@ async def show_main(obj, edit=True, greeting=False):
       await obj.message.edit_text(text=t, reply_markup=markup)
     except TelegramBadRequest as e:
       if "message is not modified" in str(e):
-        # Игнорируем, если текст и кнопки совпадают
         return
       raise
   else:
