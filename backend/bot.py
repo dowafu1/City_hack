@@ -2,6 +2,9 @@ import os
 import re
 import asyncio
 from datetime import timedelta
+
+from dotenv import load_dotenv
+
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, \
@@ -20,9 +23,55 @@ from db import (
   get_due_subscribers, reset_subscriptions, toggle_subscription
 )
 
-# === Загрузка переменных окружения ===
-from dotenv import load_dotenv
+# === Константы и конфигурация ===
+WELCOME_TEXT = (
+  "👋 Привет! Я — *Цифровой помощник* Центра молодежной политики Томской области.\n\n"
+  "🔹 Если ты в *острой или угрожающей ситуации* — сразу нажми **«🚨 Тревожная кнопка»**.\n"
+  "Ты получишь экстренные контакты и сможешь анонимно передать запрос — с приоритетной обработкой.\n\n"
+  "🔹 Если всё в порядке — выбери, кто ты:\n"
+  "• *Я подросток* — поддержка, советы, понимание\n"
+  "• *Я взрослый* — ресурсы и помощь\n\n"
+  "После выбора откроются разделы помощи, мероприятий и связи со специалистами.\n\n"
+  "Выбери, что подходит тебе сейчас:"
+)
 
+INFO_TEXT = (
+  "🧠 *Чем я могу помочь?*\n\n"
+  "Выбирай, что тебе нужно — я рядом:\n\n"
+
+  "🆘 *Тревожная кнопка*\n"
+  "Если ты в опасности — получи экстренные контакты мгновенно.\n\n"
+
+  "🧭 *Мне нужна помощь*\n"
+  "Пошаговая поддержка: что делать, если тревожно, страшно или тяжело.\n\n"
+
+  "🤖 Поддержка (с использованием ИИ)\n"
+  "Получи совет, прежде чем обращаться к специалисту\n\n"
+
+  "📞 *Куда обратиться?*\n"
+  "Горячие линии, психологи, юристы — контакты служб поддержки.\n\n"
+
+  "❓ *Задать вопрос*\n"
+  "Анонимно напиши специалисту — я передам и помогу получить ответ.\n\n"
+
+  "📅 *Мероприятия*\n"
+  "Чем заняться: афиша событий для молодёжи от ЦМП и партнёров.\n\n"
+
+  "💡 *Получить совет*\n"
+  "Тёплый совет дня — чтобы было чуть легче.\n\n"
+
+  "🔔 *Подписаться на поддержку*\n"
+  "Получай напоминания и советы каждый день — просто оставайся на связи.\n\n"
+
+  "🔄 *Изменить роль*\n"
+  "Смени роль (подросток / взрослый), чтобы я лучше понимал, как помочь.\n\n"
+
+  "Готов начать? Выбери нужное в меню ниже:"
+)
+
+PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
+
+# Загрузка переменных окружения
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 if not os.path.exists(dotenv_path):
   print(f"❌ Файл .env не найден по пути: {dotenv_path}")
@@ -31,60 +80,14 @@ if not os.path.exists(dotenv_path):
 load_dotenv(dotenv_path)
 print(f"✅ Переменные окружения загружены из: {dotenv_path}")
 
-# === Конфигурация ===
-WELCOME_TEXT = (
-    "👋 Привет! Я — *Цифровой помощник* Центра молодежной политики Томской области.\n\n"
-    "🔹 Если ты в *острой или угрожающей ситуации* — сразу нажми **«🚨 Тревожная кнопка»**.\n"
-    "Ты получишь экстренные контакты и сможешь анонимно передать запрос — с приоритетной обработкой.\n\n"
-    "🔹 Если всё в порядке — выбери, кто ты:\n"
-    "• *Я подросток* — поддержка, советы, понимание\n"
-    "• *Я взрослый* — ресурсы и помощь\n\n"
-    "После выбора откроются разделы помощи, мероприятий и связи со специалистами.\n\n"
-    "Выбери, что подходит тебе сейчас:"
-)
-
-INFO_TEXT = (
-    "🧠 *Чем я могу помочь?*\n\n"
-    "Выбирай, что тебе нужно — я рядом:\n\n"
-
-    "🆘 *Тревожная кнопка*\n"
-    "Если ты в опасности — получи экстренные контакты мгновенно.\n\n"
-
-    "🧭 *Мне нужна помощь*\n"
-    "Пошаговая поддержка: что делать, если тревожно, страшно или тяжело.\n\n"
-    
-    "🤖 Поддержка (с использованием ИИ)\n"
-    "Получи совет, прежде чем обращаться к специалисту\n\n"
-    
-    "📞 *Куда обратиться?*\n"
-    "Горячие линии, психологи, юристы — контакты служб поддержки.\n\n"
-
-    "❓ *Задать вопрос*\n"
-    "Анонимно напиши специалисту — я передам и помогу получить ответ.\n\n"
-
-    "📅 *Мероприятия*\n"
-    "Чем заняться: афиша событий для молодёжи от ЦМП и партнёров.\n\n"
-
-    "💡 *Получить совет*\n"
-    "Тёплый совет дня — чтобы было чуть легче.\n\n"
-
-    "🔔 *Подписаться на поддержку*\n"
-    "Получай напоминания и советы каждый день — просто оставайся на связи.\n\n"
-
-    "🔄 *Изменить роль*\n"
-    "Смени роль (подросток / взрослый), чтобы я лучше понимал, как помочь.\n\n"
-
-    "Готов начать? Выбери нужное в меню ниже:"
-)
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
   print("❌ Переменная BOT_TOKEN не задана в .env")
   exit(1)
 
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x.strip()}
-PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
+# Инициализация бота и диспетчера
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -108,7 +111,7 @@ class ThrottlingMiddleware(BaseMiddleware):
 dp.message.middleware(ThrottlingMiddleware())
 
 
-# === FSM ===
+# === FSM состояния ===
 class RoleForm(StatesGroup):
   role = State()
 
@@ -122,8 +125,18 @@ class AdminForm(StatesGroup):
   payload = State()
 
 
-# === Главное меню — в порядке, как в INFO_TEXT ===
+# === Вспомогательные функции ===
+def get_persistent_keyboard() -> ReplyKeyboardMarkup:
+  """Постоянная клавиатура с тревожной кнопкой."""
+  return ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="🚨 Тревожная кнопка")]],
+    resize_keyboard=True,
+    one_time_keyboard=False
+  )
+
+
 def main_menu(user_id: int) -> InlineKeyboardMarkup:
+  """Генерация главного меню с учетом роли пользователя."""
   buttons = [
     [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
     [InlineKeyboardButton(text="🧭 Мне нужна помощь", callback_data="navigator")],
@@ -140,8 +153,8 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
   return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-# === Показ главного меню ===
 async def show_main(obj, edit=True, greeting=False):
+  """Показ главного меню с текстом."""
   text = INFO_TEXT if greeting else "Чем могу помочь?"
   markup = main_menu(obj.from_user.id)
   if edit:
@@ -155,18 +168,12 @@ async def show_main(obj, edit=True, greeting=False):
     await obj.answer(text=text, reply_markup=markup)
 
 
-# === Обработчики ===
+# === Обработчики для пользователей ===
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
   await log_action(m.from_user.id, "start")
   role = await get_role(m.from_user.id)
-
-  # Постоянная тревожная кнопка внизу
-  kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="🚨 Тревожная кнопка")]],
-    resize_keyboard=True,
-    one_time_keyboard=False
-  )
+  kb = get_persistent_keyboard()
 
   if not role:
     kb.keyboard.append([KeyboardButton(text="Я подросток"), KeyboardButton(text="Я взрослый")])
@@ -196,11 +203,7 @@ async def choose_role(m: types.Message, state: FSMContext):
   await set_role(m.from_user.id, role)
   await state.clear()
 
-  kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="🚨 Тревожная кнопка")]],
-    resize_keyboard=True,
-    one_time_keyboard=False
-  )
+  kb = get_persistent_keyboard()
   await m.reply("Спасибо за выбор. Я учту это, чтобы лучше помогать.", reply_markup=kb)
   await m.answer(INFO_TEXT, reply_markup=kb)
   await show_main(m, edit=False, greeting=False)
@@ -223,7 +226,6 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
   await state.set_state(RoleForm.role)
 
 
-# === Навигатор помощи: выбор кластера ===
 @dp.callback_query(F.data == "navigator")
 async def navigator(c: types.CallbackQuery):
   await log_action(c.from_user.id, "navigator")
@@ -247,142 +249,107 @@ async def navigator(c: types.CallbackQuery):
   )
 
 
-# === Кластер 1: Депрессивные настроения ===
-@dp.callback_query(F.data == "cluster_1")
-async def cluster_1(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_1")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_1_response")
+@dp.callback_query(F.data.startswith("cluster_"))
+async def handle_cluster(c: types.CallbackQuery):
+  cluster_data = c.data
+  await log_action(c.from_user.id, cluster_data)
+  await add_chat_message(c.message.chat.id, "ai", f"{cluster_data}_response")
 
-  text = (
-    "😔 *Депрессивные настроения*\n\n"
-    "Ты не один. Многие сталкиваются с чувством пустоты, усталости, потерей интереса к жизни.\n\n"
-    "Это не слабость. Это сигнал, что тебе нужна поддержка.\n\n"
-    "Что может помочь:\n"
-    "— Поговорить с психологом\n"
-    "— Записать, что ты чувствуешь\n"
-    "— Не требовать от себя «быть сильным»\n\n"
-    "Хочешь узнать, где получить помощь? Или просто поговорить — я здесь."
-  )
+  clusters = {
+    "cluster_1": {
+      "text": (
+        "😔 *Депрессивные настроения*\n\n"
+        "Ты не один. Многие сталкиваются с чувством пустоты, усталости, потерей интереса к жизни.\n\n"
+        "Это не слабость. Это сигнал, что тебе нужна поддержка.\n\n"
+        "Что может помочь:\n"
+        "— Поговорить с психологом\n"
+        "— Записать, что ты чувствуешь\n"
+        "— Не требовать от себя «быть сильным»\n\n"
+        "Хочешь узнать, где получить помощь? Или просто поговорить — я здесь."
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📞 Куда обратиться?", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    },
+    "cluster_2": {
+      "text": (
+        "⚠️ *Суицидальные мысли*\n\n"
+        "Если ты сейчас чувствуешь, что не справляешься — это очень важно.\n\n"
+        "Ты не обязан нести это в одиночку. Есть люди, которым можно позвонить *прямо сейчас*.\n\n"
+        "Ты важен. Мир не станет лучше без тебя.\n\n"
+        "Давай найдём, кто сможет помочь — даже если ты просто хочешь, чтобы кто-то выслушал."
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
+        [InlineKeyboardButton(text="📞 Горячие линии", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    },
+    "cluster_3": {
+      "text": (
+        "💢 *Агрессия и раздражение*\n\n"
+        "Иногда злость накапливается — из-за стресса, давления, чувства несправедливости.\n\n"
+        "Это нормально — испытывать сильные эмоции. Важно не дать им причинить вред тебе или другим.\n\n"
+        "Мы можем разобраться:\n"
+        "— Что вызывает вспышки?\n"
+        "— Как справляться, не навредив себе?\n"
+        "— Где найти поддержку?"
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧠 Управление эмоциями", callback_data="help_me")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    },
+    "cluster_4": {
+      "text": (
+        "🍽️ *Проблемы с едой*\n\n"
+        "Отношения с едой могут быть сложными: переедание, отказ от пищи, чувство вины после еды.\n\n"
+        "Это не про «слабую волю» — это сигнал, что с тобой что-то происходит.\n\n"
+        "Ты заслуживаешь поддержки. Давай разберёмся, как начать заботиться о себе — без осуждения."
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📞 Специалисты по ППП", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    },
+    "cluster_5": {
+      "text": (
+        "🫂 *Половое воспитание*\n\n"
+        "Вопросы о теле, отношениях, сексуальности — это нормально.\n\n"
+        "Ты имеешь право знать, как устроен твой организм, как защищать себя и свои границы.\n\n"
+        "Здесь нет глупых вопросов. Спрашивай — получишь честный, безопасный и анонимный ответ."
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 Получить информацию", callback_data="help_me")],
+        [InlineKeyboardButton(text="💬 Задать вопрос анонимно", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    },
+    "cluster_6": {
+      "text": (
+        "👥 *Сложности в общении*\n\n"
+        "Бывает тяжело находить общий язык с родителями, друзьями, учителями.\n\n"
+        "Чувствуешь, что тебя не понимают? Боишься конфликтов? Одинок, даже в толпе?\n\n"
+        "Ты не один. Давай вместе найдём способы улучшить общение — и почувствовать себя услышанным."
+      ),
+      "kb": InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧠 Советы по общению", callback_data="help_me")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
+      ])
+    }
+  }
 
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📞 Куда обратиться?", callback_data="contacts")],
-    [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
-
-
-# === Кластер 2: Суицидальные мысли ===
-@dp.callback_query(F.data == "cluster_2")
-async def cluster_2(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_2")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_2_response")
-
-  text = (
-    "⚠️ *Суицидальные мысли*\n\n"
-    "Если ты сейчас чувствуешь, что не справляешься — это очень важно.\n\n"
-    "Ты не обязан нести это в одиночку. Есть люди, которым можно позвонить *прямо сейчас*.\n\n"
-    "Ты важен. Мир не станет лучше без тебя.\n\n"
-    "Давай найдём, кто сможет помочь — даже если ты просто хочешь, чтобы кто-то выслушал."
-  )
-
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
-    [InlineKeyboardButton(text="📞 Горячие линии", callback_data="contacts")],
-    [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
-
-
-# === Кластер 3: Агрессия и раздражение ===
-@dp.callback_query(F.data == "cluster_3")
-async def cluster_3(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_3")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_3_response")
-
-  text = (
-    "💢 *Агрессия и раздражение*\n\n"
-    "Иногда злость накапливается — из-за стресса, давления, чувства несправедливости.\n\n"
-    "Это нормально — испытывать сильные эмоции. Важно не дать им причинить вред тебе или другим.\n\n"
-    "Мы можем разобраться:\n"
-    "— Что вызывает вспышки?\n"
-    "— Как справляться, не навредив себе?\n"
-    "— Где найти поддержку?"
-  )
-
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🧠 Управление эмоциями", callback_data="help_me")],
-    [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
-
-
-# === Кластер 4: Проблемы с едой ===
-@dp.callback_query(F.data == "cluster_4")
-async def cluster_4(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_4")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_4_response")
-
-  text = (
-    "🍽️ *Проблемы с едой*\n\n"
-    "Отношения с едой могут быть сложными: переедание, отказ от пищи, чувство вины после еды.\n\n"
-    "Это не про «слабую волю» — это сигнал, что с тобой что-то происходит.\n\n"
-    "Ты заслуживаешь поддержки. Давай разберёмся, как начать заботиться о себе — без осуждения."
-  )
-
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📞 Специалисты по ППП", callback_data="contacts")],
-    [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
-
-
-# === Кластер 5: Половое воспитание ===
-@dp.callback_query(F.data == "cluster_5")
-async def cluster_5(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_5")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_5_response")
-
-  text = (
-    "🫂 *Половое воспитание*\n\n"
-    "Вопросы о теле, отношениях, сексуальности — это нормально.\n\n"
-    "Ты имеешь право знать, как устроен твой организм, как защищать себя и свои границы.\n\n"
-    "Здесь нет глупых вопросов. Спрашивай — получишь честный, безопасный и анонимный ответ."
-  )
-
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📚 Получить информацию", callback_data="help_me")],
-    [InlineKeyboardButton(text="💬 Задать вопрос анонимно", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
+  data = clusters.get(cluster_data)
+  if data:
+    await c.message.edit_text(text=data["text"], reply_markup=data["kb"])
 
 
-# === Кластер 6: Сложности в общении ===
-@dp.callback_query(F.data == "cluster_6")
-async def cluster_6(c: types.CallbackQuery):
-  await log_action(c.from_user.id, "cluster_6")
-  await add_chat_message(c.message.chat.id, "ai", "cluster_6_response")
-
-  text = (
-    "👥 *Сложности в общении*\n\n"
-    "Бывает тяжело находить общий язык с родителями, друзьями, учителями.\n\n"
-    "Чувствуешь, что тебя не понимают? Боишься конфликтов? Одинок, даже в толпе?\n\n"
-    "Ты не один. Давай вместе найдём способы улучшить общение — и почувствовать себя услышанным."
-  )
-
-  kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🧠 Советы по общению", callback_data="help_me")],
-    [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
-    [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-  ])
-  await c.message.edit_text(text=text, reply_markup=kb)
-
-
-# === Поддержка (ИИ) — заглушка для диалога ===
 @dp.callback_query(F.data == "ai_support")
 async def ai_support(c: types.CallbackQuery):
   await log_action(c.from_user.id, "ai_support")
@@ -397,7 +364,6 @@ async def ai_support(c: types.CallbackQuery):
   )
 
 
-# === Контакты ===
 @dp.callback_query(F.data == "contacts")
 async def contacts(c: types.CallbackQuery):
   await log_action(c.from_user.id, "contacts")
@@ -419,7 +385,6 @@ async def contacts(c: types.CallbackQuery):
   )
 
 
-# === Тревожная кнопка ===
 @dp.callback_query(F.data == "sos")
 async def sos(c: types.CallbackQuery):
   await log_action(c.from_user.id, "sos")
@@ -452,7 +417,6 @@ async def sos(c: types.CallbackQuery):
     await c.message.delete()
 
 
-# === Прямой вызов тревожной кнопки из клавиатуры ===
 @dp.message(F.text == "🚨 Тревожная кнопка")
 async def sos_direct(m: types.Message):
   await log_action(m.from_user.id, "sos_direct")
@@ -472,7 +436,6 @@ async def sos_direct(m: types.Message):
   await m.answer(text, reply_markup=kb, disable_web_page_preview=True)
 
 
-# === Мероприятия ===
 @dp.callback_query(F.data == "events")
 async def events(c: types.CallbackQuery):
   await log_action(c.from_user.id, "events")
@@ -493,7 +456,6 @@ async def events(c: types.CallbackQuery):
   )
 
 
-# === Задать вопрос ===
 @dp.callback_query(F.data == "question")
 async def question(c: types.CallbackQuery, state: FSMContext):
   await log_action(c.from_user.id, "question")
@@ -520,7 +482,6 @@ async def save_question_handler(m: types.Message, state: FSMContext):
   await show_main(m, edit=False)
 
 
-# === Получить совет ===
 @dp.callback_query(F.data == "tip")
 async def tip(c: types.CallbackQuery):
   await log_action(c.from_user.id, "tip")
@@ -534,7 +495,6 @@ async def tip(c: types.CallbackQuery):
   )
 
 
-# === Подписка ===
 @dp.callback_query(F.data == "sub")
 async def sub(c: types.CallbackQuery):
   success = await toggle_subscription(c.from_user.id)
@@ -552,7 +512,12 @@ async def sub(c: types.CallbackQuery):
   await show_main(c, edit=False)
 
 
-# === Админ-панель ===
+@dp.callback_query(F.data == "back")
+async def back(c: types.CallbackQuery):
+  await show_main(c, edit=True)
+
+
+# === Обработчики для администраторов ===
 @dp.callback_query(F.data == "admin")
 async def admin(c: types.CallbackQuery, state: FSMContext):
   if c.from_user.id not in ADMIN_IDS:
@@ -619,13 +584,7 @@ async def admin_save(m: types.Message, state: FSMContext):
     await state.clear()
 
 
-# === Назад в главное меню ===
-@dp.callback_query(F.data == "back")
-async def back(c: types.CallbackQuery):
-  await show_main(c, edit=True)
-
-
-# === Рассылка советов ===
+# === Функция рассылки советов ===
 async def notifier():
   while True:
     await asyncio.sleep(60)
@@ -647,7 +606,7 @@ async def notifier():
       await reset_subscriptions(sent)
 
 
-# === Запуск ===
+# === Запуск бота ===
 async def main():
   await init_db()
   asyncio.create_task(notifier())
