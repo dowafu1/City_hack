@@ -1,18 +1,14 @@
-import os
 import asyncio
 
-from dotenv import load_dotenv
 from mistralai import Mistral
 from mistralai.models import UserMessage, SystemMessage, ChatCompletionResponse
-
-load_dotenv()
 
 
 async def make_chat(client: Mistral,
                     prompt: str,
                     messages: list,
                     preset_prompt="Ты эмпатичный бот-психолог, который помогает пользователю решить его проблемы. "
-                                  "Отвечай только на русском языке.") -> ChatCompletionResponse:
+                                  "Отвечай только на языке сообщения пользователя.") -> ChatCompletionResponse:
     if not bool(messages):
         messages.append(SystemMessage(content=preset_prompt))
     messages.append(UserMessage(content=prompt))
@@ -25,6 +21,10 @@ async def make_chat(client: Mistral,
 
 
 async def main():
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
     print(await make_chat(Mistral(api_key=os.getenv('MISTRAL_TOKEN')),
                           "Привет, я чувствую себя ужасно. Что мне делать?",
                           []))
