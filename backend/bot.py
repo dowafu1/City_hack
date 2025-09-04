@@ -9,6 +9,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramBadRequest
 
 WELCOME_TEXT = (
   "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
@@ -41,16 +42,21 @@ class ThrottlingMiddleware(BaseMiddleware):
 dp.message.middleware(ThrottlingMiddleware())
 
 
-class RoleForm(StatesGroup): role = State()
+class RoleForm(StatesGroup):
+  role = State()
 
 
-class QuestionForm(StatesGroup): question = State()
+class QuestionForm(StatesGroup):
+  question = State()
 
 
-class AdminForm(StatesGroup): section = State(); payload = State()
+class AdminForm(StatesGroup):
+  section = State()
+  payload = State()
 
 
-def db(): return sqlite3.connect("cmp_bot.db")
+def db():
+  return sqlite3.connect("cmp_bot.db")
 
 
 def init_db():
@@ -108,10 +114,18 @@ def main_menu(u):
 
 async def show_main(obj, edit=True, greeting=False):
   t = WELCOME_TEXT + "\n\nВыберите действие:" if greeting else "Главное меню:"
+  markup = main_menu(obj.from_user.id)
+
   if edit:
-    await obj.message.edit_text(text=t, reply_markup=main_menu(obj.from_user.id))
+    try:
+      await obj.message.edit_text(text=t, reply_markup=markup)
+    except TelegramBadRequest as e:
+      if "message is not modified" in str(e):
+        # Игнорируем, если текст и кнопки совпадают
+        return
+      raise
   else:
-    await obj.answer(text=t, reply_markup=main_menu(obj.from_user.id))
+    await obj.answer(text=t, reply_markup=markup)
 
 
 @dp.message(Command("start"))
@@ -229,7 +243,8 @@ async def sub(c: types.CallbackQuery):
       x.execute("INSERT INTO subs (user_id,next_at) VALUES (?,?)",
                 (c.from_user.id, (datetime.now() + timedelta(days=1)).isoformat()))
       await c.answer("Буду присылать советы раз в день")
-  await show_main(c)
+  # используем edit=False, чтобы избежать ошибки "message is not modified"
+  await show_main(c, edit=False)
 
 
 @dp.callback_query(F.data == "admin")
