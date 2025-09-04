@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, \
+  ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -105,7 +106,8 @@ def main_menu(u):
     [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="question")],
     [InlineKeyboardButton(text="💡 Совет дня", callback_data="tip")],
     [InlineKeyboardButton(text="📊 Опрос", callback_data="poll")],
-    [InlineKeyboardButton(text="🔔 Подписаться на советы", callback_data="sub")]
+    [InlineKeyboardButton(text="🔔 Подписаться на советы", callback_data="sub")],
+    [InlineKeyboardButton(text="🔄 Изменить роль", callback_data="change_role")]
   ]
   if u in ADMIN_IDS:
     rows.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
@@ -143,7 +145,18 @@ async def start(m: types.Message, state: FSMContext):
 async def choose_role(m: types.Message, state: FSMContext):
   await set_role(m.from_user.id, "teen" if "подросток" in m.text.lower() else "parent")
   await state.clear()
+  await m.reply("Роль выбрана.", reply_markup=ReplyKeyboardRemove())
   await show_main(m, edit=False)
+
+
+@dp.callback_query(F.data == "change_role")
+async def change_role(c: types.CallbackQuery, state: FSMContext):
+  await log(c.from_user.id, "change_role")
+  await c.message.delete()
+  kb = ReplyKeyboardMarkup(resize_keyboard=True,
+                           keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]])
+  await c.message.answer(text="Выбери роль:", reply_markup=kb)
+  await state.set_state(RoleForm.role)
 
 
 @dp.callback_query(F.data == "navigator")

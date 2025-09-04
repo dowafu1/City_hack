@@ -14,13 +14,14 @@ class MockTypes:
   InlineKeyboardButton = MagicMock
   ReplyKeyboardMarkup = MagicMock
   KeyboardButton = MagicMock
+  ReplyKeyboardRemove = MagicMock
 
 
 types = MockTypes()
 
 
 class MockF:
-  data = MagicMock()
+  data = MagicMock
 
 
 F = MockF()
@@ -50,6 +51,7 @@ from backend.bot import (
   show_main,
   start,
   choose_role,
+  change_role,
   nav,
   nav_sub,
   contacts,
@@ -144,14 +146,14 @@ async def test_log(mock_db):
 
 def test_main_menu_non_admin():
   kb = main_menu(1)
-  assert len(kb.inline_keyboard) == 8
-  assert kb.inline_keyboard[0][0].text == "🧭 Навигатор помощи"
+  assert len(kb.inline_keyboard) == 9
+  assert kb.inline_keyboard[8][0].text == "🔄 Изменить роль"
 
 
 def test_main_menu_admin():
   kb = main_menu(123456789)
-  assert len(kb.inline_keyboard) == 9
-  assert kb.inline_keyboard[8][0].text == "⚙️ Админ панель"
+  assert len(kb.inline_keyboard) == 10
+  assert kb.inline_keyboard[9][0].text == "⚙️ Админ панель"
 
 
 @pytest.mark.asyncio
@@ -209,12 +211,14 @@ async def test_choose_role_teen():
   msg = MagicMock()
   msg.from_user = MagicMock(id=1)
   msg.text = "Я подросток"
+  msg.reply = AsyncMock()
   state = MagicMock()
   state.clear = AsyncMock()
   with patch('backend.bot.set_role') as mock_set, patch('backend.bot.show_main') as mock_show:
     await choose_role(msg, state)
   mock_set.assert_called_with(1, "teen")
   state.clear.assert_called()
+  msg.reply.assert_called_with("Роль выбрана.", reply_markup=types.ReplyKeyboardRemove())
   mock_show.assert_called_with(msg, edit=False)
 
 
@@ -223,13 +227,31 @@ async def test_choose_role_parent():
   msg = MagicMock()
   msg.from_user = MagicMock(id=1)
   msg.text = "Я родитель"
+  msg.reply = AsyncMock()
   state = MagicMock()
   state.clear = AsyncMock()
   with patch('backend.bot.set_role') as mock_set, patch('backend.bot.show_main') as mock_show:
     await choose_role(msg, state)
   mock_set.assert_called_with(1, "parent")
   state.clear.assert_called()
+  msg.reply.assert_called_with("Роль выбрана.", reply_markup=types.ReplyKeyboardRemove())
   mock_show.assert_called_with(msg, edit=False)
+
+
+@pytest.mark.asyncio
+async def test_change_role():
+  cb = MagicMock()
+  cb.from_user = MagicMock(id=1)
+  cb.message = MagicMock()
+  cb.message.delete = AsyncMock()
+  cb.message.answer = AsyncMock()
+  state = MagicMock()
+  state.set_state = AsyncMock()
+  with patch('backend.bot.log'):
+    await change_role(cb, state)
+  cb.message.delete.assert_called_once()
+  cb.message.answer.assert_called_once()
+  state.set_state.assert_called_with(RoleForm.role)
 
 
 @pytest.mark.asyncio
