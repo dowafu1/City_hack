@@ -3,6 +3,8 @@ torch
 torchaudio
 soundfile
 huggingface_hub[hf_xet]
+librosa
+numpy==2.2
 
 aiofiles
 pytest==8.4.1
