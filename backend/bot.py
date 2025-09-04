@@ -15,6 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
 import asyncpg
 
+# === Настройки ===
 WELCOME_TEXT = (
     "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
     "🔹 Помогу найти контакты служб\n"
@@ -25,7 +26,6 @@ WELCOME_TEXT = (
 
 load_dotenv()
 
-# Настройки бота
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x.strip()}
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
@@ -34,7 +34,7 @@ bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher(storage=MemoryStorage())
 
 
-# --- Middleware для ограничения частоты запросов ---
+# === Middleware: Ограничение частоты запросов ===
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, rate_limit=10):
         self.rate_limit = rate_limit
@@ -46,7 +46,7 @@ class ThrottlingMiddleware(BaseMiddleware):
 
         if user_id in self.last_call:
             if current_time - self.last_call[user_id] < 1 / self.rate_limit:
-                return  # Игнорируем слишком частые вызовы
+                return
         self.last_call[user_id] = current_time
 
         return await handler(event, data)
@@ -55,7 +55,7 @@ class ThrottlingMiddleware(BaseMiddleware):
 dp.message.middleware(ThrottlingMiddleware())
 
 
-# --- FSM ---
+# === FSM ===
 class RoleForm(StatesGroup):
     role = State()
 
@@ -69,27 +69,30 @@ class AdminForm(StatesGroup):
     payload = State()
 
 
-# --- Подключение к PostgreSQL ---
+# === Подключение к PostgreSQL ===
 async def get_db():
     return await asyncpg.connect(
         host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", 5432),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASS", "password"),
+        port=int(os.getenv("DB_PORT", 5432)),
+        user=os.getenv("DB_USER", os.getlogin()),
+        password=os.getenv("DB_PASS", ""),
         database=os.getenv("DB_NAME", "cmp_bot")
     )
 
 
-# --- Инициализация таблиц ---
+# === Инициализация таблиц ===
 async def init_db():
     conn = await get_db()
     try:
+        # Пользователи
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 role TEXT
             )
         ''')
+
+        # Статьи
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS articles (
                 id SERIAL PRIMARY KEY,
@@ -98,6 +101,8 @@ async def init_db():
                 content TEXT
             )
         ''')
+
+        # Контакты
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS contacts (
                 id SERIAL PRIMARY KEY,
@@ -107,12 +112,16 @@ async def init_db():
                 description TEXT
             )
         ''')
+
+        # SOS-инструкции
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS sos_instructions (
                 id SERIAL PRIMARY KEY,
                 text TEXT
             )
         ''')
+
+        # Мероприятия
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS events (
                 id SERIAL PRIMARY KEY,
@@ -122,6 +131,8 @@ async def init_db():
                 link TEXT
             )
         ''')
+
+        # Вопросы
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS questions (
                 id SERIAL PRIMARY KEY,
@@ -130,12 +141,16 @@ async def init_db():
                 timestamp TEXT
             )
         ''')
+
+        # Советы
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS tips (
                 id SERIAL PRIMARY KEY,
                 text TEXT
             )
         ''')
+
+        # Опросы
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS polls (
                 id SERIAL PRIMARY KEY,
@@ -143,6 +158,8 @@ async def init_db():
                 results TEXT
             )
         ''')
+
+        # Логи
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY,
@@ -151,17 +168,36 @@ async def init_db():
                 timestamp TEXT
             )
         ''')
+
+        # Подписки
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS subs (
                 user_id BIGINT PRIMARY KEY,
                 next_at TEXT
             )
         ''')
+
+        # 💬 История чата (новая таблица)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL,
+                role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'ai')),
+                content TEXT NOT NULL,
+                timestamp TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
+
+        # Индекс для производительности
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)
+        ''')
+
     finally:
         await conn.close()
 
 
-# --- Функции работы с БД ---
+# === Функции работы с БД ===
 async def get_role(user_id: int):
     conn = await get_db()
     try:
@@ -194,7 +230,42 @@ async def log_action(user_id: int, action: str):
         await conn.close()
 
 
-# --- Клавиатура ---
+# 💬 НОВОЕ: Функции для работы с историей чата
+async def add_chat_message(chat_id: int, role: str, content: str):
+    """Добавляет сообщение в историю чата"""
+    if role not in ("user", "ai"):
+        raise ValueError("Role must be 'user' or 'ai'")
+    conn = await get_db()
+    try:
+        await conn.execute(
+            """
+            INSERT INTO chat_history (chat_id, role, content, timestamp)
+            VALUES ($1, $2, $3, $4)
+            """,
+            chat_id, role, content, datetime.now()
+        )
+    finally:
+        await conn.close()
+
+
+async def get_chat_history(chat_id: int) -> list:
+    """Возвращает историю сообщений для чата"""
+    conn = await get_db()
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT role, content FROM chat_history
+            WHERE chat_id = $1
+            ORDER BY timestamp ASC
+            """,
+            chat_id
+        )
+        return [{"role": r["role"], "content": r["content"]} for r in rows]
+    finally:
+        await conn.close()
+
+
+# === Клавиатуры ===
 def main_menu(user_id: int):
     rows = [
         [InlineKeyboardButton(text="🧭 Навигатор помощи", callback_data="navigator")],
@@ -227,10 +298,12 @@ async def show_main(obj, edit=True, greeting=False):
         await obj.answer(text=t, reply_markup=markup)
 
 
-# --- Обработчики ---
+# === Обработчики ===
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await log_action(m.from_user.id, "start")
+    await add_chat_message(m.chat.id, "user", "/start")  # 📝 Логируем
+
     role = await get_role(m.from_user.id)
     if not role:
         kb = ReplyKeyboardMarkup(
@@ -248,6 +321,9 @@ async def choose_role(m: types.Message, state: FSMContext):
     role = "teen" if "подросток" in m.text.lower() else "parent"
     await set_role(m.from_user.id, role)
     await state.clear()
+    await add_chat_message(m.chat.id, "user", m.text)
+    await add_chat_message(m.chat.id, "ai", "Роль выбрана.")
+
     await m.reply("Роль выбрана.", reply_markup=ReplyKeyboardRemove())
     await show_main(m, edit=False)
 
@@ -255,6 +331,8 @@ async def choose_role(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "change_role")
 async def change_role(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "change_role")
+    await add_chat_message(c.message.chat.id, "user", "change_role")
+
     await c.message.delete()
     kb = ReplyKeyboardMarkup(
         resize_keyboard=True,
@@ -267,6 +345,8 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "navigator")
 async def nav(c: types.CallbackQuery):
     await log_action(c.from_user.id, "navigator")
+    await add_chat_message(c.message.chat.id, "user", "navigator")
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="😟 Мне нужна помощь", callback_data="help_me")],
         [InlineKeyboardButton(text="🚨 Хочу сообщить о...", callback_data="report")],
@@ -288,6 +368,7 @@ async def nav_sub(c: types.CallbackQuery):
     finally:
         await conn.close()
 
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -299,6 +380,8 @@ async def nav_sub(c: types.CallbackQuery):
 @dp.callback_query(F.data == "contacts")
 async def contacts(c: types.CallbackQuery):
     await log_action(c.from_user.id, "contacts")
+    await add_chat_message(c.message.chat.id, "user", "contacts")
+
     conn = await get_db()
     try:
         rows = await conn.fetch("SELECT category, name, phone, description FROM contacts")
@@ -306,6 +389,7 @@ async def contacts(c: types.CallbackQuery):
     finally:
         await conn.close()
 
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -317,6 +401,8 @@ async def contacts(c: types.CallbackQuery):
 @dp.callback_query(F.data == "sos")
 async def sos(c: types.CallbackQuery):
     await log_action(c.from_user.id, "sos")
+    await add_chat_message(c.message.chat.id, "user", "sos")
+
     conn = await get_db()
     try:
         row = await conn.fetchrow("SELECT text FROM sos_instructions LIMIT 1")
@@ -324,6 +410,7 @@ async def sos(c: types.CallbackQuery):
     finally:
         await conn.close()
 
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -335,6 +422,8 @@ async def sos(c: types.CallbackQuery):
 @dp.callback_query(F.data == "events")
 async def events(c: types.CallbackQuery):
     await log_action(c.from_user.id, "events")
+    await add_chat_message(c.message.chat.id, "user", "events")
+
     conn = await get_db()
     try:
         rows = await conn.fetch("SELECT title, date, description, link FROM events")
@@ -342,6 +431,7 @@ async def events(c: types.CallbackQuery):
     finally:
         await conn.close()
 
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -352,12 +442,17 @@ async def events(c: types.CallbackQuery):
 
 @dp.callback_query(F.data == "question")
 async def question(c: types.CallbackQuery, state: FSMContext):
+    await log_action(c.from_user.id, "question")
+    await add_chat_message(c.message.chat.id, "user", "question")
+
     await c.message.edit_text(text="Напиши вопрос ❓")
     await state.set_state(QuestionForm.question)
 
 
 @dp.message(QuestionForm.question)
 async def save_question(m: types.Message, state: FSMContext):
+    await add_chat_message(m.chat.id, "user", m.text)
+
     conn = await get_db()
     try:
         await conn.execute(
@@ -368,6 +463,7 @@ async def save_question(m: types.Message, state: FSMContext):
         await conn.close()
 
     await state.clear()
+    await add_chat_message(m.chat.id, "ai", "Вопрос отправлен 🚀")
     await m.answer(text="Вопрос отправлен 🚀")
     await show_main(m, edit=False)
 
@@ -375,6 +471,8 @@ async def save_question(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "tip")
 async def tip(c: types.CallbackQuery):
     await log_action(c.from_user.id, "tip")
+    await add_chat_message(c.message.chat.id, "user", "tip")
+
     conn = await get_db()
     try:
         row = await conn.fetchrow("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1")
@@ -382,6 +480,7 @@ async def tip(c: types.CallbackQuery):
     finally:
         await conn.close()
 
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
         text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -393,8 +492,12 @@ async def tip(c: types.CallbackQuery):
 @dp.callback_query(F.data == "poll")
 async def poll(c: types.CallbackQuery):
     await log_action(c.from_user.id, "poll")
+    await add_chat_message(c.message.chat.id, "user", "poll")
+
+    t = "Пока опросов нету 📊"
+    await add_chat_message(c.message.chat.id, "ai", t)
     await c.message.edit_text(
-        text="Пока опросов нету 📊",
+        text=t,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
         ])
@@ -403,12 +506,15 @@ async def poll(c: types.CallbackQuery):
 
 @dp.callback_query(F.data == "sub")
 async def sub(c: types.CallbackQuery):
+    await add_chat_message(c.message.chat.id, "user", "sub")
+
     conn = await get_db()
     try:
         row = await conn.fetchrow("SELECT next_at FROM subs WHERE user_id = $1", c.from_user.id)
         if row:
             await conn.execute("DELETE FROM subs WHERE user_id = $1", c.from_user.id)
             await c.answer("Подписка отключена")
+            await add_chat_message(c.message.chat.id, "ai", "Подписка отключена")
         else:
             next_at = (datetime.now() + timedelta(days=1)).isoformat()
             await conn.execute(
@@ -416,6 +522,7 @@ async def sub(c: types.CallbackQuery):
                 c.from_user.id, next_at
             )
             await c.answer("Буду присылать советы раз в день")
+            await add_chat_message(c.message.chat.id, "ai", "Подписка активирована")
     finally:
         await conn.close()
 
@@ -427,6 +534,9 @@ async def admin(c: types.CallbackQuery, state: FSMContext):
     if c.from_user.id not in ADMIN_IDS:
         await c.answer("Доступ запрещён", show_alert=True)
         return
+
+    await log_action(c.from_user.id, "admin")
+    await add_chat_message(c.message.chat.id, "user", "admin")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
@@ -445,6 +555,8 @@ async def admin_pick(c: types.CallbackQuery, state: FSMContext):
     if c.from_user.id not in ADMIN_IDS:
         await c.answer("Доступ запрещён", show_alert=True)
         return
+
+    await add_chat_message(c.message.chat.id, "user", c.data)
 
     messages = {
         "ad_contacts": "Формат: category|name|+7(XXX)XXX-XX-XX|description",
@@ -468,6 +580,8 @@ async def admin_save(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS:
         await m.answer("Доступ запрещён")
         return
+
+    await add_chat_message(m.chat.id, "user", m.text)
 
     data = await state.get_data()
     section = data["section"]
@@ -500,6 +614,7 @@ async def admin_save(m: types.Message, state: FSMContext):
             return
 
         await m.answer("✅ Сохранено")
+        await add_chat_message(m.chat.id, "ai", "✅ Сохранено")
         await show_main(m, edit=False)
     finally:
         await conn.close()
@@ -508,13 +623,14 @@ async def admin_save(m: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "back")
 async def back(c: types.CallbackQuery):
+    await add_chat_message(c.message.chat.id, "user", "back")
     await show_main(c)
 
 
-# --- Ежедневный рассылка советов ---
+# === Ежедневная рассылка советов ===
 async def notifier():
     while True:
-        await asyncio.sleep(60)  # Проверяем каждую минуту
+        await asyncio.sleep(60)
         now = datetime.now()
         conn = await get_db()
         try:
@@ -526,19 +642,20 @@ async def notifier():
                     text = tip_row['text'] if tip_row else "Совет дня: поддержка рядом — позвони 8-800-2000-122"
                     try:
                         await bot.send_message(user_id, text)
+                        await add_chat_message(user_id, "ai", text)  # 📝 Логируем отправку
                     except Exception:
-                        pass  # Игнорируем недоступных пользователей
+                        pass
                     new_next = (now + timedelta(days=1)).isoformat()
                     await conn.execute("UPDATE subs SET next_at = $1 WHERE user_id = $2", new_next, user_id)
         finally:
             await conn.close()
 
 
-# --- Запуск ---
+# === Запуск ===
 async def main():
     await init_db()
     asyncio.create_task(notifier())
-    print("Бот запущен...")
+    print("✅ Бот запущен. История чата включена.")
     await dp.start_polling(bot)
 
 
