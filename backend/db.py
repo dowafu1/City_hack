@@ -1,218 +1,252 @@
-# db.py
 import os
-import asyncio
-from datetime import datetime
-import asyncpg
-from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from sqlalchemy import (
+  Column, Integer, BigInteger, String, Text, ForeignKey, CheckConstraint, func
+)
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import declarative_base
 
-# === Подключение ===
-@asynccontextmanager
-async def get_conn():
-    conn = await asyncpg.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        user=os.getenv("DB_USER", os.getlogin()),
-        password=os.getenv("DB_PASS", ""),
-        database=os.getenv("DB_NAME", "cmp_bot")
-    )
-    try:
-        yield conn
-    finally:
-        await conn.close()
+DATABASE_URL = (
+  f"postgresql+asyncpg://{os.getenv('DB_USER', os.getlogin())}:"
+  f"{os.getenv('DB_PASS', '')}@{os.getenv('DB_HOST', 'localhost')}:"
+  f"{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME', 'cmp_bot')}"
+)
+
+engine = create_async_engine(DATABASE_URL, echo=False)
+async_session = async_sessionmaker(engine, expire_on_commit=False)
+Base = declarative_base()
 
 
-# === Инициализация схемы ===
+# === Модели ===
+class User(Base):
+  __tablename__ = "users"
+  user_id = Column(BigInteger, primary_key=True)
+  role = Column(String)
+
+
+class Article(Base):
+  __tablename__ = "articles"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  category = Column(String)
+  title = Column(String)
+  content = Column(Text)
+
+
+class Contact(Base):
+  __tablename__ = "contacts"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  category = Column(String)
+  name = Column(String)
+  phone = Column(String)
+  description = Column(Text)
+
+
+class SosInstruction(Base):
+  __tablename__ = "sos_instructions"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  text = Column(Text)
+
+
+class Event(Base):
+  __tablename__ = "events"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  title = Column(String)
+  date = Column(String)
+  description = Column(Text)
+  link = Column(String)
+
+
+class Question(Base):
+  __tablename__ = "questions"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  user_id = Column(BigInteger)
+  question = Column(Text)
+  timestamp = Column(String)
+
+
+class Tip(Base):
+  __tablename__ = "tips"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  text = Column(Text)
+
+
+class Poll(Base):
+  __tablename__ = "polls"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  poll_id = Column(String)
+  results = Column(Text)
+
+
+class Log(Base):
+  __tablename__ = "logs"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  user_id = Column(BigInteger)
+  action = Column(String)
+  timestamp = Column(String)
+
+
+class Sub(Base):
+  __tablename__ = "subs"
+  user_id = Column(BigInteger, primary_key=True)
+  next_at = Column(String)
+
+
+class ChatHistory(Base):
+  __tablename__ = "chat_history"
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  chat_id = Column(BigInteger, nullable=False)
+  role = Column(String(10), nullable=False)
+  content = Column(Text, nullable=False)
+  timestamp = Column(String, server_default=func.now())
+
+  __table_args__ = (
+    CheckConstraint("role IN ('user','ai')", name="chk_role"),
+  )
+
+
+# === Инициализация ===
 async def init_db():
-    async with get_conn() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, role TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS articles (id SERIAL PRIMARY KEY, category TEXT, title TEXT, content TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS contacts (id SERIAL PRIMARY KEY, category TEXT, name TEXT, phone TEXT, description TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS sos_instructions (id SERIAL PRIMARY KEY, text TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS events (id SERIAL PRIMARY KEY, title TEXT, date TEXT, description TEXT, link TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS questions (id SERIAL PRIMARY KEY, user_id BIGINT, question TEXT, timestamp TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS tips (id SERIAL PRIMARY KEY, text TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS polls (id SERIAL PRIMARY KEY, poll_id TEXT, results TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id BIGINT, action TEXT, timestamp TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS subs (user_id BIGINT PRIMARY KEY, next_at TEXT)
-        ''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id SERIAL PRIMARY KEY,
-                chat_id BIGINT NOT NULL,
-                role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'ai')),
-                content TEXT NOT NULL,
-                timestamp TIMESTAMPTZ DEFAULT NOW()
-            )
-        ''')
-        await conn.execute('''
-            CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)
-        ''')
+  async with engine.begin() as conn:
+    await conn.run_sync(Base.metadata.create_all)
 
 
-# === Базовые операции ===
-async def get_role(user_id: int) -> str | None:
-    async with get_conn() as conn:
-        row = await conn.fetchrow("SELECT role FROM users WHERE user_id = $1", user_id)
-        return row["role"] if row else None
+# === CRUD-функции ===
+async def get_role(user_id: int):
+  async with async_session() as session:
+    user = await session.get(User, user_id)
+    return user.role if user else None
 
 
 async def set_role(user_id: int, role: str):
-    async with get_conn() as conn:
-        await conn.execute('''
-            INSERT INTO users (user_id, role) VALUES ($1, $2)
-            ON CONFLICT (user_id) DO UPDATE SET role = $2
-        ''', user_id, role)
+  async with async_session() as session:
+    user = await session.get(User, user_id)
+    if not user:
+      user = User(user_id=user_id, role=role)
+      session.add(user)
+    else:
+      user.role = role
+    await session.commit()
 
 
 async def log_action(user_id: int, action: str):
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO logs (user_id, action, timestamp) VALUES ($1, $2, $3)",
-            user_id, action, datetime.now().isoformat()
-        )
+  async with async_session() as session:
+    session.add(Log(user_id=user_id, action=action, timestamp=datetime.now().isoformat()))
+    await session.commit()
 
 
-# === Чат-история ===
 async def add_chat_message(chat_id: int, role: str, content: str):
-    if role not in ("user", "ai"):
-        raise ValueError("Role must be 'user' or 'ai'")
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO chat_history (chat_id, role, content) VALUES ($1, $2, $3)",
-            chat_id, role, content
-        )
+  async with async_session() as session:
+    session.add(ChatHistory(chat_id=chat_id, role=role, content=content))
+    await session.commit()
 
 
-async def get_chat_history(chat_id: int) -> list[dict]:
-    async with get_conn() as conn:
-        rows = await conn.fetch(
-            "SELECT role, content FROM chat_history WHERE chat_id = $1 ORDER BY timestamp ASC",
-            chat_id
-        )
-        return [{"role": r["role"], "content": r["content"]} for r in rows]
+async def get_chat_history(chat_id: int):
+  async with async_session() as session:
+    result = await session.execute(
+      ChatHistory.__table__.select().where(ChatHistory.chat_id == chat_id).order_by(ChatHistory.timestamp)
+    )
+    return [{"role": r.role, "content": r.content} for r in result.scalars()]
 
 
-# === Админ-запросы ===
-async def upsert_contact(category: str, name: str, phone: str, description: str):
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO contacts (category, name, phone, description) VALUES ($1, $2, $3, $4)",
-            category, name, phone, description
-        )
+# Админ-запросы
+async def upsert_contact(category, name, phone, description):
+  async with async_session() as session:
+    session.add(Contact(category=category, name=name, phone=phone, description=description))
+    await session.commit()
 
 
 async def upsert_sos(text: str):
-    async with get_conn() as conn:
-        await conn.execute("DELETE FROM sos_instructions")
-        await conn.execute("INSERT INTO sos_instructions (text) VALUES ($1)", text)
+  async with async_session() as session:
+    await session.execute(SosInstruction.__table__.delete())
+    session.add(SosInstruction(text=text))
+    await session.commit()
 
 
-async def upsert_event(title: str, date: str, desc: str, link: str):
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO events (title, date, description, link) VALUES ($1, $2, $3, $4)",
-            title, date, desc, link
-        )
+async def upsert_event(title, date, desc, link):
+  async with async_session() as session:
+    session.add(Event(title=title, date=date, description=desc, link=link))
+    await session.commit()
 
 
-async def upsert_article(category: str, title: str, content: str):
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO articles (category, title, content) VALUES ($1, $2, $3)",
-            category, title, content
-        )
+async def upsert_article(category, title, content):
+  async with async_session() as session:
+    session.add(Article(category=category, title=title, content=content))
+    await session.commit()
 
 
 async def upsert_tip(text: str):
-    async with get_conn() as conn:
-        await conn.execute("INSERT INTO tips (text) VALUES ($1)", text)
+  async with async_session() as session:
+    session.add(Tip(text=text))
+    await session.commit()
 
 
-# === Получение данных ===
-async def get_articles(category: str) -> list[tuple]:
-    async with get_conn() as conn:
-        return await conn.fetch("SELECT title, content FROM articles WHERE category = $1", category)
+# Получение данных
+async def get_articles(category: str):
+  async with async_session() as session:
+    result = await session.execute(Article.__table__.select().where(Article.category == category))
+    return [(a.title, a.content) for a in result.scalars()]
 
 
-async def get_contacts() -> list[tuple]:
-    async with get_conn() as conn:
-        return await conn.fetch("SELECT category, name, phone, description FROM contacts")
+async def get_contacts():
+  async with async_session() as session:
+    result = await session.execute(Contact.__table__.select())
+    return [(c.category, c.name, c.phone, c.description) for c in result.scalars()]
 
 
-async def get_sos() -> str:
-    async with get_conn() as conn:
-        row = await conn.fetchrow("SELECT text FROM sos_instructions LIMIT 1")
-        return row["text"] if row else "🆘 При опасности звоните 112 или 102."
+async def get_sos():
+  async with async_session() as session:
+    result = await session.execute(SosInstruction.__table__.select().limit(1))
+    row = result.scalars().first()
+    return row.text if row else "🆘 При опасности звоните 112 или 102."
 
 
-async def get_events() -> list[tuple]:
-    async with get_conn() as conn:
-        return await conn.fetch("SELECT title, date, description, link FROM events")
+async def get_events():
+  async with async_session() as session:
+    result = await session.execute(Event.__table__.select())
+    return [(e.title, e.date, e.description, e.link) for e in result.scalars()]
 
 
-async def get_tip() -> str:
-    async with get_conn() as conn:
-        row = await conn.fetchrow("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1")
-        return row["text"] if row else "Совет дня: подыши глубже, это помогает. 😊"
+async def get_tip():
+  async with async_session() as session:
+    result = await session.execute(Tip.__table__.select().order_by(func.random()).limit(1))
+    row = result.scalars().first()
+    return row.text if row else "Совет дня: подыши глубже, это помогает. 😊"
 
 
 async def save_question(user_id: int, text: str):
-    async with get_conn() as conn:
-        await conn.execute(
-            "INSERT INTO questions (user_id, question, timestamp) VALUES ($1, $2, $3)",
-            user_id, text, datetime.now().isoformat()
-        )
+  async with async_session() as session:
+    session.add(Question(user_id=user_id, question=text, timestamp=datetime.now().isoformat()))
+    await session.commit()
 
 
-# === Подписки ===
-async def get_due_subscribers() -> list[int]:
-    now = datetime.now().isoformat()
-    async with get_conn() as conn:
-        rows = await conn.fetch("SELECT user_id FROM subs WHERE next_at <= $1", now)
-        return [r["user_id"] for r in rows]
+# Подписки
+async def get_due_subscribers():
+  now = datetime.now().isoformat()
+  async with async_session() as session:
+    result = await session.execute(Sub.__table__.select().where(Sub.next_at <= now))
+    return [s.user_id for s in result.scalars()]
 
 
 async def reset_subscriptions(user_ids: list[int]):
-    now = datetime.now().isoformat()
-    next_at = (datetime.now() + timedelta(days=1)).isoformat()
-    if not user_ids:
-        return
-    async with get_conn() as conn:
-        await conn.execute(
-            "UPDATE subs SET next_at = $1 WHERE user_id = ANY($2::BIGINT[])",
-            next_at, user_ids
-        )
+  if not user_ids:
+    return
+  next_at = (datetime.now() + timedelta(days=1)).isoformat()
+  async with async_session() as session:
+    await session.execute(
+      Sub.__table__.update().where(Sub.user_id.in_(user_ids)).values(next_at=next_at)
+    )
+    await session.commit()
 
 
 async def toggle_subscription(user_id: int):
-    async with get_conn() as conn:
-        row = await conn.fetchrow("SELECT next_at FROM subs WHERE user_id = $1", user_id)
-        if row:
-            await conn.execute("DELETE FROM subs WHERE user_id = $1", user_id)
-            return False
-        else:
-            next_at = (datetime.now() + timedelta(days=1)).isoformat()
-            await conn.execute(
-                "INSERT INTO subs (user_id, next_at) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET next_at = $2",
-                user_id, next_at
-            )
-            return True
+  async with async_session() as session:
+    sub = await session.get(Sub, user_id)
+    if sub:
+      await session.delete(sub)
+      await session.commit()
+      return False
+    else:
+      next_at = (datetime.now() + timedelta(days=1)).isoformat()
+      session.add(Sub(user_id=user_id, next_at=next_at))
+      await session.commit()
+      return True
