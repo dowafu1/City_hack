@@ -408,36 +408,57 @@ async def test_poll():
 
 
 @pytest.mark.asyncio
-async def test_sub_subscribe(mock_db):
-  cb = MagicMock()
-  cb.from_user = MagicMock(id=1)
-  cb.answer = AsyncMock()
-  with patch('backend.bot.show_main') as mock_show:
-    await sub(cb)
-  cb.answer.assert_called_with("Буду присылать советы раз в день")
-  mock_show.assert_called_with(cb)
-  cur = mock_db.cursor()
-  cur.execute("SELECT next_at FROM subs WHERE user_id=1")
-  next_at = cur.fetchone()[0]
-  next_at_dt = datetime.fromisoformat(next_at)
-  expected_dt = datetime.now() + timedelta(days=1)
-  assert abs((next_at_dt - expected_dt).total_seconds()) < 10
+async def test_sub_subscribe():
+    cb = MagicMock(spec=types.CallbackQuery)
+    cb.from_user = MagicMock(id=1)
+    cb.answer = AsyncMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = None
+    mock_connection = MagicMock()
+    mock_connection.execute.return_value = mock_cursor
+    mock_connection.__enter__.return_value = mock_connection
+    mock_connection.__exit__.return_value = None
+    fixed_time = datetime(2023, 1, 1, 12, 0, 0)
+    expected_next_at = '2023-01-02T12:00:00'
+
+    with patch('backend.bot.db', return_value=mock_connection), \
+         patch('backend.bot.show_main', new=AsyncMock()) as mock_show, \
+         patch('backend.bot.datetime') as mock_datetime:
+        mock_datetime.now.return_value = fixed_time
+        mock_datetime.isoformat = lambda x: x.replace(microsecond=0).isoformat()
+        await sub(cb)
+    mock_connection.execute.assert_any_call(
+        "SELECT next_at FROM subs WHERE user_id=?", (1,)
+    )
+    mock_connection.execute.assert_any_call(
+        "INSERT INTO subs (user_id,next_at) VALUES (?,?)", (1, expected_next_at)
+    )
+    cb.answer.assert_called_with("Буду присылать советы раз в день")
+    mock_show.assert_called_with(cb, edit=False)
 
 
 @pytest.mark.asyncio
-async def test_sub_unsubscribe(mock_db):
-  cb = MagicMock()
-  cb.from_user = MagicMock(id=1)
-  cb.answer = AsyncMock()
-  mock_db.execute("INSERT INTO subs VALUES (1, '2023-01-01T00:00:00')")
-  mock_db.commit()
-  with patch('backend.bot.show_main') as mock_show:
-    await sub(cb)
-  cb.answer.assert_called_with("Подписка отключена")
-  mock_show.assert_called_with(cb)
-  cur = mock_db.cursor()
-  cur.execute("SELECT * FROM subs WHERE user_id=1")
-  assert cur.fetchone() is None
+async def test_sub_unsubscribe():
+    cb = MagicMock(spec=types.CallbackQuery)
+    cb.from_user = MagicMock(id=1)
+    cb.answer = AsyncMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = ('2023-01-01T00:00:00',)
+    mock_connection = MagicMock()
+    mock_connection.execute.return_value = mock_cursor
+    mock_connection.__enter__.return_value = mock_connection
+    mock_connection.__exit__.return_value = None
+    with patch('backend.bot.db', return_value=mock_connection), \
+         patch('backend.bot.show_main', new=AsyncMock()) as mock_show:
+        await sub(cb)
+    mock_connection.execute.assert_any_call(
+        "SELECT next_at FROM subs WHERE user_id=?", (1,)
+    )
+    mock_connection.execute.assert_any_call(
+        "DELETE FROM subs WHERE user_id=?", (1,)
+    )
+    cb.answer.assert_called_with("Подписка отключена")
+    mock_show.assert_called_with(cb, edit=False)
 
 
 @pytest.mark.asyncio
