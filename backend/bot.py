@@ -1,21 +1,30 @@
+# bot.py
 import os
 import re
 import asyncio
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from datetime import timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, \
-    ReplyKeyboardRemove
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
-import asyncpg
 
-# === Настройки ===
+from db import (
+    init_db, log_action, get_role, set_role, add_chat_message, get_chat_history,
+    get_articles, get_contacts, get_sos, get_events, get_tip, save_question,
+    upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip,
+    get_due_subscribers, reset_subscriptions, toggle_subscription
+)
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# === Конфигурация ===
 WELCOME_TEXT = (
     "👋 Привет! Я — бот *Центра молодежной политики Томской области*.\n\n"
     "🔹 Помогу найти контакты служб\n"
@@ -23,8 +32,6 @@ WELCOME_TEXT = (
     "🔹 Расскажу о мероприятиях\n\n"
     "✨ Всё конфиденциально и без лишних формальностей!"
 )
-
-load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x.strip()}
@@ -34,7 +41,7 @@ bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher(storage=MemoryStorage())
 
 
-# === Middleware: Ограничение частоты запросов ===
+# === Middleware ===
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, rate_limit=10):
         self.rate_limit = rate_limit
@@ -42,13 +49,11 @@ class ThrottlingMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
         user_id = event.from_user.id
-        current_time = asyncio.get_event_loop().time()
-
-        if user_id in self.last_call:
-            if current_time - self.last_call[user_id] < 1 / self.rate_limit:
-                return
-        self.last_call[user_id] = current_time
-
+        now = asyncio.get_event_loop().time()
+        last = self.last_call.get(user_id, 0)
+        if now - last < 1 / self.rate_limit:
+            return
+        self.last_call[user_id] = now
         return await handler(event, data)
 
 
@@ -69,205 +74,9 @@ class AdminForm(StatesGroup):
     payload = State()
 
 
-# === Подключение к PostgreSQL ===
-async def get_db():
-    return await asyncpg.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        user=os.getenv("DB_USER", os.getlogin()),
-        password=os.getenv("DB_PASS", ""),
-        database=os.getenv("DB_NAME", "cmp_bot")
-    )
-
-
-# === Инициализация таблиц ===
-async def init_db():
-    conn = await get_db()
-    try:
-        # Пользователи
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                role TEXT
-            )
-        ''')
-
-        # Статьи
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS articles (
-                id SERIAL PRIMARY KEY,
-                category TEXT,
-                title TEXT,
-                content TEXT
-            )
-        ''')
-
-        # Контакты
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS contacts (
-                id SERIAL PRIMARY KEY,
-                category TEXT,
-                name TEXT,
-                phone TEXT,
-                description TEXT
-            )
-        ''')
-
-        # SOS-инструкции
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS sos_instructions (
-                id SERIAL PRIMARY KEY,
-                text TEXT
-            )
-        ''')
-
-        # Мероприятия
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS events (
-                id SERIAL PRIMARY KEY,
-                title TEXT,
-                date TEXT,
-                description TEXT,
-                link TEXT
-            )
-        ''')
-
-        # Вопросы
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS questions (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                question TEXT,
-                timestamp TEXT
-            )
-        ''')
-
-        # Советы
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS tips (
-                id SERIAL PRIMARY KEY,
-                text TEXT
-            )
-        ''')
-
-        # Опросы
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS polls (
-                id SERIAL PRIMARY KEY,
-                poll_id TEXT,
-                results TEXT
-            )
-        ''')
-
-        # Логи
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS logs (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                action TEXT,
-                timestamp TEXT
-            )
-        ''')
-
-        # Подписки
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS subs (
-                user_id BIGINT PRIMARY KEY,
-                next_at TEXT
-            )
-        ''')
-
-        # 💬 История чата (только для нужных действий)
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id SERIAL PRIMARY KEY,
-                chat_id BIGINT NOT NULL,
-                role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'ai')),
-                content TEXT NOT NULL,
-                timestamp TIMESTAMPTZ DEFAULT NOW()
-            )
-        ''')
-
-        # Индекс
-        await conn.execute('''
-            CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)
-        ''')
-
-    finally:
-        await conn.close()
-
-
-# === Функции работы с БД ===
-async def get_role(user_id: int):
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow("SELECT role FROM users WHERE user_id = $1", user_id)
-        return row['role'] if row else None
-    finally:
-        await conn.close()
-
-
-async def set_role(user_id: int, role: str):
-    conn = await get_db()
-    try:
-        await conn.execute('''
-            INSERT INTO users (user_id, role)
-            VALUES ($1, $2)
-            ON CONFLICT (user_id) DO UPDATE SET role = $2
-        ''', user_id, role)
-    finally:
-        await conn.close()
-
-
-async def log_action(user_id: int, action: str):
-    conn = await get_db()
-    try:
-        await conn.execute(
-            "INSERT INTO logs (user_id, action, timestamp) VALUES ($1, $2, $3)",
-            user_id, action, datetime.now().isoformat()
-        )
-    finally:
-        await conn.close()
-
-
-# 💬 НОВОЕ: Функции для работы с историей чата
-async def add_chat_message(chat_id: int, role: str, content: str):
-    """Добавляет сообщение в историю чата (только для нужных действий)"""
-    if role not in ("user", "ai"):
-        raise ValueError("Role must be 'user' or 'ai'")
-    conn = await get_db()
-    try:
-        await conn.execute(
-            """
-            INSERT INTO chat_history (chat_id, role, content, timestamp)
-            VALUES ($1, $2, $3, $4)
-            """,
-            chat_id, role, content, datetime.now()
-        )
-    finally:
-        await conn.close()
-
-
-async def get_chat_history(chat_id: int) -> list:
-    """Возвращает историю сообщений для чата"""
-    conn = await get_db()
-    try:
-        rows = await conn.fetch(
-            """
-            SELECT role, content FROM chat_history
-            WHERE chat_id = $1
-            ORDER BY timestamp ASC
-            """,
-            chat_id
-        )
-        return [{"role": r["role"], "content": r["content"]} for r in rows]
-    finally:
-        await conn.close()
-
-
 # === Клавиатуры ===
-def main_menu(user_id: int):
-    rows = [
+def main_menu(user_id: int) -> InlineKeyboardMarkup:
+    buttons = [
         [InlineKeyboardButton(text="🧭 Навигатор помощи", callback_data="navigator")],
         [InlineKeyboardButton(text="📞 Куда обращаться?", callback_data="contacts")],
         [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
@@ -279,39 +88,32 @@ def main_menu(user_id: int):
         [InlineKeyboardButton(text="🔄 Изменить роль", callback_data="change_role")]
     ]
     if user_id in ADMIN_IDS:
-        rows.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        buttons.append([InlineKeyboardButton(text="⚙️ Админ панель", callback_data="admin")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 async def show_main(obj, edit=True, greeting=False):
-    t = WELCOME_TEXT + "\n\nВыберите действие:" if greeting else "Главное меню:"
+    text = WELCOME_TEXT + "\n\nВыберите действие:" if greeting else "Главное меню:"
     markup = main_menu(obj.from_user.id)
-
     if edit:
         try:
-            await obj.message.edit_text(text=t, reply_markup=markup)
+            await obj.message.edit_text(text=text, reply_markup=markup)
         except TelegramBadRequest as e:
             if "message is not modified" in str(e):
                 return
             raise
     else:
-        await obj.answer(text=t, reply_markup=markup)
+        await obj.answer(text=text, reply_markup=markup)
 
 
 # === Обработчики ===
-
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await log_action(m.from_user.id, "start")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
     role = await get_role(m.from_user.id)
     if not role:
-        kb = ReplyKeyboardMarkup(
-            resize_keyboard=True,
-            keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]]
-        )
-        await m.answer(text=WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]], resize_keyboard=True)
+        await m.answer(WELCOME_TEXT + "\n\nВыбери роль:", reply_markup=kb)
         await state.set_state(RoleForm.role)
     else:
         await show_main(m, edit=False, greeting=True)
@@ -322,7 +124,6 @@ async def choose_role(m: types.Message, state: FSMContext):
     role = "teen" if "подросток" in m.text.lower() else "parent"
     await set_role(m.from_user.id, role)
     await state.clear()
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
     await m.reply("Роль выбрана.", reply_markup=ReplyKeyboardRemove())
     await show_main(m, edit=False)
 
@@ -330,195 +131,113 @@ async def choose_role(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "change_role")
 async def change_role(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "change_role")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
     await c.message.delete()
-    kb = ReplyKeyboardMarkup(
-        resize_keyboard=True,
-        keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]]
-    )
-    await c.message.answer(text="Выбери роль:", reply_markup=kb)
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Я подросток"), KeyboardButton(text="Я родитель")]], resize_keyboard=True)
+    await c.message.answer("Выбери роль:", reply_markup=kb)
     await state.set_state(RoleForm.role)
 
 
 @dp.callback_query(F.data == "navigator")
 async def nav(c: types.CallbackQuery):
     await log_action(c.from_user.id, "navigator")
-    await add_chat_message(c.message.chat.id, "user", "navigator")  # ✅ ЛОГИРУЕМ
-
+    await add_chat_message(c.message.chat.id, "user", "navigator")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="😟 Мне нужна помощь", callback_data="help_me")],
         [InlineKeyboardButton(text="🚨 Хочу сообщить о...", callback_data="report")],
         [InlineKeyboardButton(text="❓ Другое", callback_data="other")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
     ])
-    await c.message.edit_text(text="Навигатор помощи:", reply_markup=kb)
+    await c.message.edit_text("Навигатор помощи:", reply_markup=kb)
 
 
 @dp.callback_query(F.data.in_({"help_me", "report", "other"}))
 async def nav_sub(c: types.CallbackQuery):
     role = await get_role(c.from_user.id)
-    conn = await get_db()
-    try:
-        rows = await conn.fetch(
-            "SELECT title, content FROM articles WHERE category = $1", f"{c.data}_{role}"
-        )
-        t = "\n".join(f"{a}: {b}" for a, b in rows) or "Нет информации 😔"
-    finally:
-        await conn.close()
-
-    await add_chat_message(c.message.chat.id, "ai", t)  # ✅ Ответ логируем
+    rows = await get_articles(f"{c.data}_{role}")
+    text = "\n".join(f"{a}: {b}" for a, b in rows) or "Нет информации 😔"
+    await add_chat_message(c.message.chat.id, "ai", text)
     await c.message.edit_text(
-        text=t,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
-        ])
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]])
     )
 
 
 @dp.callback_query(F.data == "contacts")
 async def contacts(c: types.CallbackQuery):
     await log_action(c.from_user.id, "contacts")
-    await add_chat_message(c.message.chat.id, "user", "contacts")  # ✅ ЛОГИРУЕМ
-
-    conn = await get_db()
-    try:
-        rows = await conn.fetch("SELECT category, name, phone, description FROM contacts")
-        t = "\n".join(f"{a}: {b} — {p} ({d})" for a, b, p, d in rows) or "Нет контактов 😔"
-    finally:
-        await conn.close()
-
-    await add_chat_message(c.message.chat.id, "ai", t)  # ✅ Ответ логируем
+    await add_chat_message(c.message.chat.id, "user", "contacts")
+    rows = await get_contacts()
+    text = "\n".join(f"{a}: {b} — {p} ({d})" for a, b, p, d in rows) or "Нет контактов 😔"
+    await add_chat_message(c.message.chat.id, "ai", text)
     await c.message.edit_text(
-        text=t,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-        ])
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     )
 
 
 @dp.callback_query(F.data == "sos")
 async def sos(c: types.CallbackQuery):
     await log_action(c.from_user.id, "sos")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow("SELECT text FROM sos_instructions LIMIT 1")
-        t = row['text'] if row else "🆘 При опасности звоните 112 или 102. Сообщите, где вы и что произошло. Оставайтесь на линии."
-    finally:
-        await conn.close()
-
+    text = await get_sos()
     await c.message.edit_text(
-        text=t,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-        ])
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     )
 
 
 @dp.callback_query(F.data == "events")
 async def events(c: types.CallbackQuery):
     await log_action(c.from_user.id, "events")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
-    conn = await get_db()
-    try:
-        rows = await conn.fetch("SELECT title, date, description, link FROM events")
-        t = "\n".join(f"{a} ({d}): {b} — {l}" for a, d, b, l in rows) or "Нет мероприятий 📅"
-    finally:
-        await conn.close()
-
+    rows = await get_events()
+    text = "\n".join(f"{a} ({d}): {b} — {l}" for a, d, b, l in rows) or "Нет мероприятий 📅"
     await c.message.edit_text(
-        text=t,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-        ])
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     )
 
 
 @dp.callback_query(F.data == "question")
 async def question(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "question")
-    await add_chat_message(c.message.chat.id, "user", "question")  # ✅ ЛОГИРУЕМ
-
-    await c.message.edit_text(text="Напиши вопрос ❓")
+    await add_chat_message(c.message.chat.id, "user", "question")
+    await c.message.edit_text("Напиши вопрос ❓")
     await state.set_state(QuestionForm.question)
 
 
 @dp.message(QuestionForm.question)
-async def save_question(m: types.Message, state: FSMContext):
-    await add_chat_message(m.chat.id, "user", m.text)  # ✅ Логируем вопрос
-
-    conn = await get_db()
-    try:
-        await conn.execute(
-            "INSERT INTO questions (user_id, question, timestamp) VALUES ($1, $2, $3)",
-            m.from_user.id, m.text, datetime.now().isoformat()
-        )
-    finally:
-        await conn.close()
-
-    await state.clear()
+async def save_question_handler(m: types.Message, state: FSMContext):
+    await add_chat_message(m.chat.id, "user", m.text)
+    await save_question(m.from_user.id, m.text)
     response = "Вопрос отправлен 🚀"
-    await m.answer(text=response)
-    await add_chat_message(m.chat.id, "ai", response)  # ✅ Логируем ответ
+    await m.answer(response)
+    await add_chat_message(m.chat.id, "ai", response)
+    await state.clear()
     await show_main(m, edit=False)
 
 
 @dp.callback_query(F.data == "tip")
 async def tip(c: types.CallbackQuery):
     await log_action(c.from_user.id, "tip")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1")
-        t = row['text'] if row else "Совет дня: подыши глубже, это помогает. 😊"
-    finally:
-        await conn.close()
-
+    text = await get_tip()
     await c.message.edit_text(
-        text=t,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-        ])
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     )
 
 
 @dp.callback_query(F.data == "poll")
 async def poll(c: types.CallbackQuery):
     await log_action(c.from_user.id, "poll")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
     await c.message.edit_text(
-        text="Пока опросов нету 📊",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-        ])
+        "Пока опросов нету 📊",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     )
 
 
 @dp.callback_query(F.data == "sub")
 async def sub(c: types.CallbackQuery):
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow("SELECT next_at FROM subs WHERE user_id = $1", c.from_user.id)
-        if row:
-            await conn.execute("DELETE FROM subs WHERE user_id = $1", c.from_user.id)
-            await c.answer("Подписка отключена")
-        else:
-            next_at = (datetime.now() + timedelta(days=1)).isoformat()
-            await conn.execute(
-                "INSERT INTO subs (user_id, next_at) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET next_at = $2",
-                c.from_user.id, next_at
-            )
-            await c.answer("Буду присылать советы раз в день")
-    finally:
-        await conn.close()
-
+    success = await toggle_subscription(c.from_user.id)
+    await c.answer("Буду присылать советы раз в день" if success else "Подписка отключена")
     await show_main(c, edit=False)
 
 
@@ -527,10 +246,7 @@ async def admin(c: types.CallbackQuery, state: FSMContext):
     if c.from_user.id not in ADMIN_IDS:
         await c.answer("Доступ запрещён", show_alert=True)
         return
-
     await log_action(c.from_user.id, "admin")
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
         [InlineKeyboardButton(text="🆘 SOS", callback_data="ad_sos")],
@@ -539,7 +255,7 @@ async def admin(c: types.CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="💡 Совет", callback_data="ad_tip")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
     ])
-    await c.message.edit_text(text="Админ: выбери раздел", reply_markup=kb)
+    await c.message.edit_text("Админ: выбери раздел", reply_markup=kb)
     await state.set_state(AdminForm.section)
 
 
@@ -548,9 +264,6 @@ async def admin_pick(c: types.CallbackQuery, state: FSMContext):
     if c.from_user.id not in ADMIN_IDS:
         await c.answer("Доступ запрещён", show_alert=True)
         return
-
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
-
     messages = {
         "ad_contacts": "Формат: category|name|+7(XXX)XXX-XX-XX|description",
         "ad_sos": "Текст SOS",
@@ -562,8 +275,7 @@ async def admin_pick(c: types.CallbackQuery, state: FSMContext):
     if not msg:
         await c.answer("Неизвестная команда")
         return
-
-    await c.message.edit_text(text=msg)
+    await c.message.edit_text(msg)
     await state.update_data(section=c.data)
     await state.set_state(AdminForm.payload)
 
@@ -573,78 +285,57 @@ async def admin_save(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS:
         await m.answer("Доступ запрещён")
         return
-
     data = await state.get_data()
-    section = data["section"]
-    parts = [x.strip() for x in m.text.split('|')]
-
-    conn = await get_db()
+    section, parts = data["section"], [x.strip() for x in m.text.split('|')]
     try:
         if section == "ad_contacts" and len(parts) == 4 and PHONE_RX.fullmatch(parts[2]):
-            await conn.execute(
-                "INSERT INTO contacts (category, name, phone, description) VALUES ($1, $2, $3, $4)",
-                *parts
-            )
+            await upsert_contact(*parts)
         elif section == "ad_sos":
-            await conn.execute("DELETE FROM sos_instructions")
-            await conn.execute("INSERT INTO sos_instructions (text) VALUES ($1)", m.text)
+            await upsert_sos(m.text)
         elif section == "ad_event" and len(parts) == 4:
-            await conn.execute(
-                "INSERT INTO events (title, date, description, link) VALUES ($1, $2, $3, $4)",
-                *parts
-            )
+            await upsert_event(*parts)
         elif section == "ad_article" and len(parts) == 3:
-            await conn.execute(
-                "INSERT INTO articles (category, title, content) VALUES ($1, $2, $3)",
-                *parts
-            )
+            await upsert_article(*parts)
         elif section == "ad_tip":
-            await conn.execute("INSERT INTO tips (text) VALUES ($1)", m.text)
+            await upsert_tip(m.text)
         else:
             await m.answer("❌ Неверный формат данных")
             return
-
         await m.answer("✅ Сохранено")
         await show_main(m, edit=False)
     finally:
-        await conn.close()
-    await state.clear()
+        await state.clear()
 
 
 @dp.callback_query(F.data == "back")
 async def back(c: types.CallbackQuery):
-    # ❌ НЕТ ЛОГИРОВАНИЯ В ЧАТ
     await show_main(c)
 
 
-# === Ежедневная рассылка советов ===
+# === Рассылка ===
 async def notifier():
     while True:
         await asyncio.sleep(60)
-        now = datetime.now()
-        conn = await get_db()
-        try:
-            rows = await conn.fetch("SELECT user_id, next_at FROM subs")
-            for row in rows:
-                user_id, next_at = row['user_id'], row['next_at']
-                if now >= datetime.fromisoformat(next_at):
-                    tip_row = await conn.fetchrow("SELECT text FROM tips ORDER BY RANDOM() LIMIT 1")
-                    text = tip_row['text'] if tip_row else "Совет дня: поддержка рядом — позвони 8-800-2000-122"
-                    try:
-                        await bot.send_message(user_id, text)
-                    except Exception:
-                        pass
-                    new_next = (now + timedelta(days=1)).isoformat()
-                    await conn.execute("UPDATE subs SET next_at = $1 WHERE user_id = $2", new_next, user_id)
-        finally:
-            await conn.close()
+        user_ids = await get_due_subscribers()
+        if not user_ids:
+            continue
+        tip_text = await get_tip()
+        sent = []
+        for user_id in user_ids:
+            try:
+                await bot.send_message(user_id, tip_text)
+                sent.append(user_id)
+            except Exception:
+                pass
+        if sent:
+            await reset_subscriptions(sent)
 
 
 # === Запуск ===
 async def main():
     await init_db()
     asyncio.create_task(notifier())
-    print("✅ Бот запущен. Логирование только для: contacts, question, navigator.")
+    print("✅ Бот запущен.")
     await dp.start_polling(bot)
 
 
