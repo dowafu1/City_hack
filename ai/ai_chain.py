@@ -20,7 +20,7 @@ async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mis
     if context_data is not None:
         context_data = [f'Файл "{key}", содержание: {value}' for key, value in context_data.items()]
     try:
-        total_answer = await sber_chat(sber, user_prompt, history, preset_prompt=prepromts['gigachat_prompt'])
+        total_answer = await sber_chat(sber, user_prompt, history, preset_prompt=prepromts['gigachat_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}')
     except Exception as e:
         print(f'Обвал SberAI в ai/ai_chain.py, chainize: {e}')
         return None

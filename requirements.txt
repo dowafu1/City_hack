@@ -1,7 +1,13 @@
+transformers
+torch
+torchaudio
+soundfile
+huggingface_hub[hf_xet]
+
 aiofiles
 pytest==8.4.1
 aiogram==3.22.0
-python-dotenv==1.1.0
+python-dotenv
 psycopg2==2.9.10
 python-telegram-bot==22.3
 pytest-cov==6.2.1
