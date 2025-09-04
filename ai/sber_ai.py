@@ -1,7 +1,7 @@
+import asyncio
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_gigachat.chat_models import GigaChat
-
-import asyncio
 
 
 async def make_chat(client: GigaChat,
