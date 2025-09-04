@@ -252,7 +252,7 @@ python bot.py
 - `events(id PK, title, date, description, link)` 
 - `questions(id PK, user_id, question, timestamp)` 
 - `tips(id PK, text)` 
-- `polls(id PK, poll_id, results)` *(зарезервировано)* 
+- `polls(id PK, poll_id, results)` 
 - `logs(id PK, user_id, action, timestamp)`
 - `subs(user_id PK, next_at)` 
 - `chat_history(id PK, chat_id, role, content, timestamp)` — история сообщений (user/ai) 
