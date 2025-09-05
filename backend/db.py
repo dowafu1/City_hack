@@ -203,7 +203,82 @@ async def toggle_subscription(user_id: int) -> bool:
       return True
 
 
-# === Админ-вставка ===
+# === Админ-функции ===
+
+# Функции для работы с контактами
+async def save_contact(category: str, name: str, phone: str, description: str):
+  """Добавляет новый контакт"""
+  async with get_conn() as conn:
+    await conn.execute(
+      "INSERT INTO contacts (category, name, phone, description) VALUES ($1, $2, $3, $4)",
+      category, name, phone, description
+    )
+
+async def update_contact(contact_id: int, category: str, name: str, phone: str, description: str):
+  """Обновляет существующий контакт"""
+  async with get_conn() as conn:
+    await conn.execute(
+      "UPDATE contacts SET category = $1, name = $2, phone = $3, description = $4 WHERE id = $5",
+      category, name, phone, description, contact_id
+    )
+
+async def delete_contact(contact_id: int):
+  """Удаляет контакт по ID"""
+  async with get_conn() as conn:
+    await conn.execute("DELETE FROM contacts WHERE id = $1", contact_id)
+
+async def get_contact_by_id(contact_id: int):
+  """Получает контакт по ID"""
+  async with get_conn() as conn:
+    return await conn.fetchrow("SELECT * FROM contacts WHERE id = $1", contact_id)
+
+
+# Функции для работы с мероприятиями
+async def save_event(title: str, date: str, description: str, link: str):
+  """Добавляет новое мероприятие"""
+  async with get_conn() as conn:
+    await conn.execute(
+      "INSERT INTO events (title, date, description, link) VALUES ($1, $2, $3, $4)",
+      title, date, description, link
+    )
+
+async def update_event(event_id: int, title: str, date: str, description: str, link: str):
+  """Обновляет существующее мероприятие"""
+  async with get_conn() as conn:
+    await conn.execute(
+      "UPDATE events SET title = $1, date = $2, description = $3, link = $4 WHERE id = $5",
+      title, date, description, link, event_id
+    )
+
+async def delete_event(event_id: int):
+  """Удаляет мероприятие по ID"""
+  async with get_conn() as conn:
+    await conn.execute("DELETE FROM events WHERE id = $1", event_id)
+
+async def get_event_by_id(event_id: int):
+  """Получает мероприятие по ID"""
+  async with get_conn() as conn:
+    return await conn.fetchrow("SELECT * FROM events WHERE id = $1", event_id)
+
+
+# Функции для работы с советами
+async def save_tip(text: str):
+  """Добавляет новый совет дня"""
+  async with get_conn() as conn:
+    await conn.execute("INSERT INTO tips (text) VALUES ($1)", text)
+
+async def update_tip(tip_id: int, text: str):
+  """Обновляет существующий совет дня"""
+  async with get_conn() as conn:
+    await conn.execute("UPDATE tips SET text = $1 WHERE id = $2", text, tip_id)
+
+async def delete_tip(tip_id: int):
+  """Удаляет совет дня по ID"""
+  async with get_conn() as conn:
+    await conn.execute("DELETE FROM tips WHERE id = $1", tip_id)
+
+
+# === Старые админ-функции (для совместимости) ===
 async def upsert_contact(category: str, name: str, phone: str, description: str):
   async with get_conn() as conn:
     await conn.execute(

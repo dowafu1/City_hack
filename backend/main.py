@@ -62,7 +62,14 @@ from handlers import (
   question, save_question_handler, tip, sub, back, admin,
   RoleForm, QuestionForm, AIChatForm,
   stop_ai_chat, handle_ai_chat, voice_input_to_text,
-  help_command, menu_command, sos_command, admin_command
+  help_command, menu_command, sos_command, admin_command,
+  # Админ-функции
+  admin_contacts, admin_contact_add, admin_events, admin_event_add,
+  admin_tip, admin_tip_edit, admin_clusters,
+  admin_contact_category, admin_contact_name, admin_contact_phone, admin_contact_description,
+  admin_event_title, admin_event_date, admin_event_description, admin_event_link,
+  admin_tip_text,
+  AdminContactForm, AdminEventForm, AdminTipForm, delete_contact_command, delete_event_command
 )
 
 dp.callback_query.middleware(AnswerCallbackMiddleware())
@@ -73,15 +80,44 @@ dp.message.register(menu_command, Command("menu"))
 dp.message.register(sos_command, Command("sos"))
 dp.message.register(admin_command, Command("admin"))
 dp.message.register(stop_ai_chat, Command("stop"))
+dp.message.register(delete_contact_command, F.text.startswith("/del_contact_"))
+dp.message.register(delete_event_command, F.text.startswith("/del_event_"))
 dp.message.register(voice_handler, F.voice, AIChatForm.chat)
 dp.message.register(handle_ai_chat, AIChatForm.chat)
 dp.message.register(choose_role, RoleForm.role)
 dp.message.register(save_question_handler, QuestionForm.question)
+
+# Админ-контакты
+dp.message.register(admin_contact_category, AdminContactForm.category)
+dp.message.register(admin_contact_name, AdminContactForm.name)
+dp.message.register(admin_contact_phone, AdminContactForm.phone)
+dp.message.register(admin_contact_description, AdminContactForm.description)
+
+# Админ-мероприятия
+dp.message.register(admin_event_title, AdminEventForm.title)
+dp.message.register(admin_event_date, AdminEventForm.date)
+dp.message.register(admin_event_description, AdminEventForm.description)
+dp.message.register(admin_event_link, AdminEventForm.link)
+
+# Админ-советы
+dp.message.register(admin_tip_text, AdminTipForm.text)
+
+# Callback handlers
 dp.callback_query.register(tip, F.data == "tip")
 dp.callback_query.register(sub, F.data == "sub")
 dp.callback_query.register(back, F.data == "back")
 dp.callback_query.register(admin, F.data == "admin")
-dp.message.register(sos_direct, F.text == "🚨 Тревожная кнопка")
+
+# Админ-панель
+dp.callback_query.register(admin_contacts, F.data == "ad_contacts")
+dp.callback_query.register(admin_contact_add, F.data == "ad_contact_add")
+dp.callback_query.register(admin_events, F.data == "ad_events")
+dp.callback_query.register(admin_event_add, F.data == "ad_event_add")
+dp.callback_query.register(admin_tip, F.data == "ad_tip")
+dp.callback_query.register(admin_tip_edit, F.data == "ad_tip_edit")
+dp.callback_query.register(admin_clusters, F.data == "ad_clusters")
+
+dp.message.register(choose_role, F.text == "🚨 Тревожная кнопка")
 
 callback_map = {
     "change_role": change_role,

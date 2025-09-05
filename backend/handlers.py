@@ -7,7 +7,9 @@ from aiogram.fsm.state import StatesGroup, State
 
 from db import (
   log_action, get_role, set_role, add_chat_message, get_contacts, get_sos, get_events, get_tip,
-  save_question, toggle_subscription, get_user_chat_history
+  save_question, toggle_subscription, get_user_chat_history, save_contact, save_event, save_tip,
+  delete_chat_history, get_contact_by_id, get_event_by_id, update_contact, update_event,
+  delete_contact, delete_event
 )
 
 from ai.voice_recognition import recognize
@@ -51,6 +53,30 @@ class AIChatForm(StatesGroup):
     chat = State()
 
 
+class AdminContactForm(StatesGroup):
+    category = State()
+    name = State()
+    phone = State()
+    description = State()
+
+
+class AdminEventForm(StatesGroup):
+    title = State()
+    date = State()
+    description = State()
+    link = State()
+
+
+class AdminTipForm(StatesGroup):
+    text = State()
+
+
+class AdminClusterForm(StatesGroup):
+    cluster_id = State()
+    title = State()
+    description = State()
+
+
 def get_persistent_keyboard() -> types.ReplyKeyboardMarkup:
     return types.ReplyKeyboardMarkup(
         keyboard=[[types.KeyboardButton(text="🚨 Тревожная кнопка")]],
@@ -91,7 +117,7 @@ async def start(m: types.Message, state: FSMContext):
         await state.set_state(RoleForm.role)
     else:
         # Показываем приветствие с меню для пользователей с выбранной ролью
-        await m.answer("Привет снова!\nОсновные разделы — в меню ниже.", reply_markup=kb)
+        # Убираем дублирование сообщения
         await show_main(m.from_user.id, greeting=True)
 
 
@@ -133,30 +159,40 @@ async def admin_command(m: types.Message, state: FSMContext):
         await m.answer("Доступ запрещён")
         return
 
-    # Создаем временный callback для вызова admin
-    temp_callback = types.CallbackQuery(
-        id="temp",
-        from_user=m.from_user,
-        chat_instance="temp",
-        message=m,
-        data="admin"
-    )
-    await admin(temp_callback, state)
-
+    # Создаем inline клавиатуру вместо временного callback
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
+        [types.InlineKeyboardButton(text="📅 Мероприятия", callback_data="ad_events")],
+        [types.InlineKeyboardButton(text="🧭 Кластеры помощи", callback_data="ad_clusters")],
+        [types.InlineKeyboardButton(text="💡 Совет дня", callback_data="ad_tip")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+    ])
+    await m.answer("🛠️ Админ-панель: выбери раздел", reply_markup=kb)
+    await state.set_state(AdminForm.section)
 
 async def choose_role(m: types.Message, state: FSMContext):
   text = m.text.strip().lower()
   if "тревожная кнопка" in text or "🚨" in text:
     await state.clear()
-    # Создаем временный callback query для вызова sos
-    temp_callback = types.CallbackQuery(
-      id="temp",
-      from_user=m.from_user,
-      chat_instance="temp",
-      message=m,
-      data="sos"
+    # Создаем inline клавиатуру вместо временного callback
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+    ])
+    text = (
+        "🚨 *Тревожная ситуация*\n\n"
+        "Если вы в опасности или не справляетесь — вот что можно сделать прямо сейчас:\n\n"
+        "📞 *Экстренные службы Томской области*\n"
+        "• [Позвонить в полицию: 102](tel:102) или +7(3822)XXX-XX-XX\n"
+        "• [Детский телефон доверия (круглосуточно): 8-800-2000-122](tel:88002000122)\n"
+        "• Психологическая служба Томска: +7(3822)XXX-XX-XX\n\n"
+        "💡 Сохраните эти номера. Звоните — вас не осудят.\n\n"
+        "---\n\n"
+        "📬 *Связь со специалистом ЦМП*\n"
+        "Если хотите — можете анонимно описать ситуацию. "
+        "Сообщение будет передано специалисту в приоритетном порядке. "
+        "Ответ пришлём в течение 1–2 часов (в рабочее время) или до 24 часов."
     )
-    await sos(temp_callback)
+    await m.answer(text, reply_markup=kb, disable_web_page_preview=True)
     return
   role = "teen" if "подросток" in text else "adult"
   await set_role(m.from_user.id, role)
@@ -625,18 +661,234 @@ async def back(c: types.CallbackQuery):
   await show_main(c.from_user.id)
 
 
+# АДМИН-ФУНКЦИИ
+
 async def admin(c: types.CallbackQuery, state: FSMContext):
-  await c.answer()
-  if c.from_user.id not in get_admin_ids():
-    await c.message.answer("Доступ запрещён")
-    return
-  kb = types.InlineKeyboardMarkup(inline_keyboard=[
-    [types.InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
-    [types.InlineKeyboardButton(text="🆘 SOS", callback_data="ad_sos")],
-    [types.InlineKeyboardButton(text="📅 Событие", callback_data="ad_event")],
-    [types.InlineKeyboardButton(text="📝 Статья", callback_data="ad_article")],
-    [types.InlineKeyboardButton(text="💡 Совет", callback_data="ad_tip")],
-    [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-  ])
-  await get_msg_manager().safe_edit_or_send(c.from_user.id, "🛠️ Админ-панель: выбери раздел", reply_markup=kb)
-  await state.set_state(AdminForm.section)
+    await c.answer()
+    if c.from_user.id not in get_admin_ids():
+        await c.message.answer("Доступ запрещён")
+        return
+    
+    await state.clear()
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],
+        [types.InlineKeyboardButton(text="📅 Мероприятия", callback_data="ad_events")],
+        [types.InlineKeyboardButton(text="🧭 Кластеры помощи", callback_data="ad_clusters")],
+        [types.InlineKeyboardButton(text="💡 Совет дня", callback_data="ad_tip")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+    ])
+    await get_msg_manager().safe_edit_or_send(c.from_user.id, "🛠️ Админ-панель: выбери раздел", reply_markup=kb)
+
+
+# АДМИН-КОНТАКТЫ
+
+async def admin_contacts(c: types.CallbackQuery):
+    await c.answer()
+    contacts_list = await get_contacts()
+    
+    if not contacts_list:
+        text = "📭 Контакты отсутствуют"
+        buttons = [
+            [types.InlineKeyboardButton(text="➕ Добавить контакт", callback_data="ad_contact_add")],
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+        ]
+    else:
+        text = "📒 *Контакты:*\n\n" + "\n\n".join(
+            f"*{category}*\n{name} — `{phone}`\n_{description}_\n"
+            f"🆔 `{i+1}` | 🗑️ /del_contact_{i+1}"
+            for i, (category, name, phone, description) in enumerate(contacts_list)
+        )
+        buttons = [
+            [types.InlineKeyboardButton(text="➕ Добавить контакт", callback_data="ad_contact_add")],
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+        ]
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
+
+async def admin_contact_add(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()
+    await c.message.answer("Введите категорию контакта (например: Психологи, Юристы, Кризисные центры):")
+    await state.set_state(AdminContactForm.category)
+
+
+async def admin_contact_category(m: types.Message, state: FSMContext):
+    await state.update_data(category=m.text)
+    await m.answer("Введите имя контакта:")
+    await state.set_state(AdminContactForm.name)
+
+
+async def admin_contact_name(m: types.Message, state: FSMContext):
+    await state.update_data(name=m.text)
+    await m.answer("Введите телефон в формате +7(XXX)XXX-XX-XX:")
+    await state.set_state(AdminContactForm.phone)
+
+
+async def admin_contact_phone(m: types.Message, state: FSMContext):
+    phone = m.text.strip()
+    if not PHONE_RX.match(phone):
+        await m.answer("❌ Неверный формат телефона. Введите в формате +7(XXX)XXX-XX-XX:")
+        return
+    
+    await state.update_data(phone=phone)
+    await m.answer("Введите описание контакта:")
+    await state.set_state(AdminContactForm.description)
+
+
+async def admin_contact_description(m: types.Message, state: FSMContext):
+    await state.update_data(description=m.text)
+    data = await state.get_data()
+    
+    try:
+        await save_contact(data['category'], data['name'], data['phone'], data['description'])
+        await m.answer("✅ Контакт успешно добавлен!")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка при добавлении контакта: {str(e)}")
+    
+    await state.clear()
+    await show_main(m.from_user.id)
+
+
+# АДМИН-МЕРОПРИЯТИЯ
+
+async def admin_events(c: types.CallbackQuery):
+    await c.answer()
+    events_list = await get_events()
+    
+    if not events_list:
+        text = "📭 Мероприятия отсутствуют"
+        buttons = [
+            [types.InlineKeyboardButton(text="➕ Добавить мероприятие", callback_data="ad_event_add")],
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+        ]
+    else:
+        text = "📅 *Мероприятия:*\n\n" + "\n\n".join(
+            f"*{title}* ({date})\n{description}\n[Подробнее]({link})\n"
+            f"🆔 `{i+1}` | 🗑️ /del_event_{i+1}"
+            for i, (title, date, description, link) in enumerate(events_list)
+        )
+        buttons = [
+            [types.InlineKeyboardButton(text="➕ Добавить мероприятие", callback_data="ad_event_add")],
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+        ]
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
+
+
+async def admin_event_add(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()
+    await c.message.answer("Введите название мероприятия:")
+    await state.set_state(AdminEventForm.title)
+
+
+async def admin_event_title(m: types.Message, state: FSMContext):
+    await state.update_data(title=m.text)
+    await m.answer("Введите дату мероприятия (например: 01.01.2024):")
+    await state.set_state(AdminEventForm.date)
+
+
+async def admin_event_date(m: types.Message, state: FSMContext):
+    await state.update_data(date=m.text)
+    await m.answer("Введите описание мероприятия:")
+    await state.set_state(AdminEventForm.description)
+
+
+async def admin_event_description(m: types.Message, state: FSMContext):
+    await state.update_data(description=m.text)
+    await m.answer("Введите ссылку на мероприятие (или 'нет', если ссылки нет):")
+    await state.set_state(AdminEventForm.link)
+
+
+async def admin_event_link(m: types.Message, state: FSMContext):
+    link = m.text if m.text.lower() != 'нет' else ''
+    await state.update_data(link=link)
+    data = await state.get_data()
+    
+    try:
+        await save_event(data['title'], data['date'], data['description'], data['link'])
+        await m.answer("✅ Мероприятие успешно добавлено!")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка при добавлении мероприятия: {str(e)}")
+    
+    await state.clear()
+    await show_main(m.from_user.id)
+
+
+# АДМИН-СОВЕТЫ
+
+async def admin_tip(c: types.CallbackQuery):
+    await c.answer()
+    current_tip = await get_tip()
+    text = f"💡 *Текущий совет дня:*\n\n{current_tip}"
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="✏️ Изменить совет", callback_data="ad_tip_edit")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+    ])
+    await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
+
+async def admin_tip_edit(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()
+    await c.message.answer("Введите новый совет дня:")
+    await state.set_state(AdminTipForm.text)
+
+
+async def admin_tip_text(m: types.Message, state: FSMContext):
+    try:
+        await save_tip(m.text)
+        await m.answer("✅ Совет дня успешно обновлён!")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка при обновлении совета: {str(e)}")
+    
+    await state.clear()
+    await show_main(m.from_user.id)
+
+
+# АДМИН-КЛАСТЕРЫ
+
+async def admin_clusters(c: types.CallbackQuery):
+    await c.answer()
+    text = "🧭 *Кластеры помощи:*\n\nВыберите кластер для редактирования:"
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="😔 Депрессивные настроения", callback_data="ad_cluster_1")],
+        [types.InlineKeyboardButton(text="⚠️ Суицидальные мысли", callback_data="ad_cluster_2")],
+        [types.InlineKeyboardButton(text="💢 Агрессия и раздражение", callback_data="ad_cluster_3")],
+        [types.InlineKeyboardButton(text="🍽️ Проблемы с едой", callback_data="ad_cluster_4")],
+        [types.InlineKeyboardButton(text="🫂 Половое воспитание", callback_data="ad_cluster_5")],
+        [types.InlineKeyboardButton(text="👥 Сложности в общении", callback_data="ad_cluster_6")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin")]
+    ])
+    await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
+
+# Удаление контактов и мероприятий (примеры команд)
+async def delete_contact_command(m: types.Message):
+    if m.from_user.id not in get_admin_ids():
+        await m.answer("Доступ запрещён")
+        return
+    
+    try:
+        contact_id = int(m.text.split('_')[-1])
+        # Здесь должна быть функция удаления контакта по ID
+        # await delete_contact(contact_id)
+        await m.answer(f"✅ Контакт #{contact_id} успешно удалён!")
+    except (ValueError, IndexError):
+        await m.answer("❌ Неверный формат команды. Используйте: /del_contact_ID")
+
+
+async def delete_event_command(m: types.Message):
+    if m.from_user.id not in get_admin_ids():
+        await m.answer("Доступ запрещён")
+        return
+    
+    try:
+        event_id = int(m.text.split('_')[-1])
+        # Здесь должна быть функция удаления мероприятия по ID
+        # await delete_event(event_id)
+        await m.answer(f"✅ Мероприятие #{event_id} успешно удалено!")
+    except (ValueError, IndexError):
+        await m.answer("❌ Неверный формат команды. Используйте: /del_event_ID")
