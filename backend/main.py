@@ -60,7 +60,7 @@ from handlers import (
   cluster_6, cluster_6_help,
   ai_support, contacts, sos, sos_direct, events,
   question, save_question_handler, tip, sub, back, admin,
-  RoleForm, QuestionForm, AdminForm, AIChatForm,
+  RoleForm, QuestionForm, AIChatForm,
   stop_ai_chat, handle_ai_chat, voice_input_to_text,
   help_command, menu_command, sos_command, admin_command
 )
