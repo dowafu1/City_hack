@@ -8,11 +8,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from mistralai import Mistral
 from langchain_gigachat.chat_models import GigaChat
 
+from backend.handlers import voice_input_to_text
 from db import init_db, upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip
 
 from config import Config
 from bot_core import AIChain, MessageManager, AnswerCallbackMiddleware, ThrottlingMiddleware, notifier, ai_chain as bc_ai_chain, msg_manager as bc_msg_manager, ADMIN_IDS as bc_ADMIN_IDS
 import bot_core
+from ai.voice_recognition import recognize_init
 from handlers import (
     start, choose_role, change_role, navigator, cluster_1, cluster_1_help, cluster_2, cluster_2_help,
     cluster_3, cluster_3_help, cluster_4, cluster_4_help, cluster_5, cluster_5_help, cluster_6, cluster_6_help,
@@ -22,6 +24,7 @@ from handlers import (
 
 Config.load_env()
 BOT_TOKEN, SBER_TOKEN, MISTRAL_TOKEN, ADMIN_IDS = Config.get_required_env_vars()
+recognizer_pipe = recognize_init()  # инициализация работы с расшифровщиком голосовых
 
 sber_client = GigaChat(credentials=SBER_TOKEN, verify_ssl_certs=False) if SBER_TOKEN else None
 if sber_client:
@@ -68,6 +71,7 @@ dp.callback_query.register(question, F.data == "question")
 dp.message.register(save_question_handler, QuestionForm.question)
 dp.callback_query.register(tip, F.data == "tip")
 dp.callback_query.register(sub, F.data == "sub")
+dp.message.register(voice_input_to_text, F.voice, recognizer_pipe)
 dp.callback_query.register(back, F.data == "back")
 dp.callback_query.register(admin, F.data == "admin")
 

@@ -10,9 +10,11 @@ from langchain_gigachat.chat_models import GigaChat
 from mistralai import Mistral
 from pathlib import Path
 from aiogram import types
-from db import get_due_subscribers, reset_subscriptions, get_tip, upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip, get_user_chat_history
+from db import get_due_subscribers, reset_subscriptions, get_tip, upsert_contact, upsert_sos, upsert_event, \
+    upsert_article, upsert_tip, get_user_chat_history
 
 from config import PresetManager
+
 
 class AIChain:
     def __init__(self, sber_client: Optional[GigaChat] = None, mistral_client: Optional[Mistral] = None):
@@ -138,12 +140,12 @@ class MessageManager:
             self.last_message_id.pop(user_id, None)
 
     async def safe_edit_or_send(
-        self,
-        user_id: int,
-        text: str,
-        reply_markup: Optional[InlineKeyboardMarkup] = None,
-        parse_mode: str = "Markdown",
-        disable_web_page_preview: bool = False
+            self,
+            user_id: int,
+            text: str,
+            reply_markup: Optional[InlineKeyboardMarkup] = None,
+            parse_mode: str = "Markdown",
+            disable_web_page_preview: bool = False
     ):
         last_msg_id = self.get_last(user_id)
         if last_msg_id:
@@ -174,6 +176,7 @@ class AnswerCallbackMiddleware(BaseMiddleware):
         await event.answer()
         return await handler(event, data)
 
+
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, rate_limit: int = 10):
         self.rate_limit = rate_limit
@@ -187,6 +190,7 @@ class ThrottlingMiddleware(BaseMiddleware):
             return
         self.last_call[user_id] = now
         return await handler(event, data)
+
 
 async def notifier(bot: Bot):
     while True:

@@ -1,4 +1,5 @@
 import re
+import os
 from typing import Optional
 
 from aiogram import types, F
@@ -8,22 +9,22 @@ from aiogram.fsm.state import StatesGroup, State
 
 from db import (
     log_action, get_role, set_role, add_chat_message, get_contacts, get_sos, get_events, get_tip,
-    save_question, toggle_subscription
+    save_question, toggle_subscription, get_user_chat_history
 )
 
+from bot_core import ai_chain, msg_manager, ADMIN_IDS
 from config import WELCOME_TEXT, INFO_TEXT
+from ai.voice_recognition import recognize
 
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
 # Отложенный импорт
 def get_msg_manager():
-    from bot_core import msg_manager
     if msg_manager is None:
         raise RuntimeError("MessageManager не инициализирован!")
     return msg_manager
 
 def get_admin_ids():
-    from bot_core import ADMIN_IDS
     return ADMIN_IDS
 
 class RoleForm(StatesGroup):
@@ -348,12 +349,12 @@ async def stop_ai_chat(m: types.Message, state: FSMContext):
     else:
         await m.answer("Сейчас нет активного диалога с ИИ.")
         
-async def handle_ai_chat(m: types.Message, state: FSMContext):
-    from bot_core import ai_chain
-    from db import get_user_chat_history, add_chat_message
-    
+async def handle_ai_chat(m: types.Message, state: FSMContext=None, another_text: str=None):
     user_id = m.from_user.id
-    user_message = m.text
+    if another_text is None:  # работа с voice сообщением
+        user_message = m.text
+    else:
+        user_message = another_text
     
     # Добавляем сообщение пользователя в историю
     await add_chat_message(user_id, "user", user_message)
@@ -363,7 +364,7 @@ async def handle_ai_chat(m: types.Message, state: FSMContext):
     
     # Отправляем сообщение о том, что ИИ думает
     thinking_msg = await m.answer("🤔 Думаю над ответом...")
-    
+
     try:
         # Получаем ответ от ИИ
         ai_response = await ai_chain.process_query(user_message, history)
@@ -497,6 +498,18 @@ async def sub(c: types.CallbackQuery):
     response = "💚 Спасибо, что остаёшься на связи! Каждый день в это же время я буду присылать тебе тёплый совет." if success else "Хорошо, я не буду беспокоить. Но помни — ты всегда можешь вернуться. Я здесь, когда захочешь."
     await c.message.answer(response)
     await show_main(c.from_user.id)
+
+
+async def voice_input_to_text(message: types.Message, rec_pipe):
+    voice = await message.voice.get_file()
+    if not os.path.exists('temp'):
+        os.mkdir('temp')
+    path = 'temp'
+    open(f'{path}/{voice.fileid}.ogg', 'wb').write(voice.read())
+    text = await recognize(f'{path}/{voice.fileid}.ogg', rec_pipe)
+    message.text = text
+    await handle_ai_chat(message, another_text=text)
+
 
 async def back(c: types.CallbackQuery):
     await c.answer()  # Отвечаем на callback

@@ -11,7 +11,7 @@ from langchain_gigachat.chat_models import GigaChat
 
 from aiofiles import open as aio_open
 
-prepromts = json.load(open("preset_prompts.json", 'rb'))
+prepromts = json.load(open("../backend/preset_prompts.json", 'rb'))
 
 
 async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mistral) -> str | None:

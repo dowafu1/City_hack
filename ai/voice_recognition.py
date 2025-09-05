@@ -5,7 +5,7 @@ import librosa
 import numpy as np
 
 
-async def recognize_init(model="openai/whisper-base"):  # model="openai/whisper-large-v3"
+def recognize_init(model="openai/whisper-base"):  # model="openai/whisper-large-v3"
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     pipe = pipeline(
         "automatic-speech-recognition",
