@@ -199,7 +199,6 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
 
 def main_menu(user_id: int) -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
         [InlineKeyboardButton(text="🧭 Мне нужна помощь", callback_data="navigator")],
         [InlineKeyboardButton(text="🤖 Поддержка (с использованием ИИ)", callback_data="ai_support")],
         [InlineKeyboardButton(text="📞 Куда обратиться?", callback_data="contacts")],
@@ -264,7 +263,6 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Я подросток"), KeyboardButton(text="Я взрослый")],
-            [KeyboardButton(text="🚨 Тревожная кнопка")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -361,8 +359,8 @@ async def cluster_2_help(c: types.CallbackQuery):
         "Ты не обязан справляться один. Есть те, кто готов помочь."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
         [InlineKeyboardButton(text="📞 Горячие линии", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="cluster_2")]
     ])
     await msg_manager.safe_edit_or_send(bot, c.from_user.id, text, reply_markup=kb)
@@ -429,8 +427,8 @@ async def cluster_4_help(c: types.CallbackQuery):
         "Ты заслуживаешь заботы — даже если чувствуешь, что «недостаточно плох»."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📘 Вести дневник (СМЭР)", callback_data="help_me")],
         [InlineKeyboardButton(text="📞 Специалисты по РПП", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="cluster_4")]
     ])
     await msg_manager.safe_edit_or_send(bot, c.from_user.id, text, reply_markup=kb)
@@ -461,8 +459,8 @@ async def cluster_5_help(c: types.CallbackQuery):
         "Ты имеешь право на безопасность и уважение."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🆘 Тревожная кнопка", callback_data="sos")],
         [InlineKeyboardButton(text="📞 Юридическая и психологическая помощь", callback_data="contacts")],
+        [InlineKeyboardButton(text="💬 Поговорить (ИИ-поддержка)", callback_data="ai_support")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="cluster_5")]
     ])
     await msg_manager.safe_edit_or_send(bot, c.from_user.id, text, reply_markup=kb)
@@ -583,26 +581,44 @@ async def events(c: types.CallbackQuery):
 @dp.callback_query(F.data == "question")
 async def question(c: types.CallbackQuery, state: FSMContext):
     await log_action(c.from_user.id, "question")
-    await msg_manager.safe_edit_or_send(
-        bot, c.from_user.id,
+    
+    # Удаляем меню перед отправкой запроса
+    await msg_manager.safe_delete(bot, c.from_user.id)
+    
+    # Отправляем сообщение от бота с запросом вопроса (новое сообщение)
+    response_text = (
         "Напиши, что тебя беспокоит. Я передам вопрос специалистам.\n\n"
         "Ты можешь остаться анонимным — твоё имя не передаётся."
     )
+    
+    # Отправляем новое сообщение
+    msg = await c.message.answer(response_text)
+    msg_manager.update(c.from_user.id, msg.message_id)
+    
     await state.set_state(QuestionForm.question)
 
 
 @dp.message(QuestionForm.question)
 async def save_question_handler(m: types.Message, state: FSMContext):
+    # Сохраняем вопрос пользователя
     await add_chat_message(m.chat.id, "user", m.text)
     await save_question(m.from_user.id, m.text)
+    
+    # Отправляем подтверждение как новое сообщение
     response = (
         "Спасибо, что доверил мне свой вопрос.\n\n"
         "Я передал его специалистам. Если понадобится — они свяжутся через этого бота.\n\n"
         "Ты сделал важный шаг. Я рядом."
     )
-    await msg_manager.safe_edit_or_send(bot, m.from_user.id, response)
+    
+    confirmation_msg = await m.answer(response)
     await add_chat_message(m.chat.id, "ai", response)
+    
+    # Очищаем состояние
     await state.clear()
+    
+    # Показываем главное меню через небольшую задержку
+    await asyncio.sleep(0.5)
     await show_main(m.from_user.id)
 
 
