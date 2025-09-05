@@ -1,8 +1,8 @@
 import asyncio
 import os
 
-from ai.sber_ai import make_chat as sber_chat
-from ai.mistral_ai import make_chat as mistral_chat
+from ai.sber_ai import make_chat as sber_chat, make_history as sber_history
+from ai.mistral_ai import make_chat as mistral_chat, make_history as mistral_history
 
 from mistralai import Mistral
 from mistralai.models.sdkerror import SDKError
@@ -14,10 +14,14 @@ from aiofiles import open as aio_open
 async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mistral, prepromts: dict) -> str | None:
     tries_count = 7
     context_data = await get_context_data('context')
+
+    mistral_msgs = await mistral_history(history)
+    sber_msgs = await sber_history(history)
+
     if context_data is not None:
         context_data = [f'Файл "{key}", содержание: {value}' for key, value in context_data.items()]
     try:
-        total_answer = await sber_chat(sber, user_prompt, history, preset_prompt=(prepromts['gigachat_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}'))
+        total_answer = await sber_chat(sber, user_prompt, sber_msgs, preset_prompt=(prepromts['gigachat_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}'))
     except Exception as e:
         print(f'Обвал SberAI в ai/ai_chain.py, chainize: {e}')
         return None
@@ -25,8 +29,8 @@ async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mis
         try:
             mistral_answer = await mistral_chat(
                 mistral,
-                f'Клиент: {user_prompt}, Предложенный вариант ответа: {total_answer}',
-                [],
+                f'Присланное сообщение: {user_prompt}, Предложенный вариант ответа: {total_answer}',
+                mistral_msgs,
                 preset_prompt=(prepromts[
                                   'mistral_summarize_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}'))
 

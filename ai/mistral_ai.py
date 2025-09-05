@@ -1,5 +1,5 @@
 from mistralai import Mistral
-from mistralai.models import UserMessage, SystemMessage, ChatCompletionResponse
+from mistralai.models import UserMessage, SystemMessage, ChatCompletionResponse, AssistantMessage
 
 
 async def make_chat(client: Mistral,
@@ -16,6 +16,16 @@ async def make_chat(client: Mistral,
         messages=messages,
     )
     return response.choices[0].message.content
+
+
+async def make_history(db_history: list[dict[str, str]]) -> list:
+    result = []
+    for number, history in enumerate(db_history):
+        if history['role'] == 'user' and number != len(db_history) - 1:
+            result.append(UserMessage(content=history['content']))
+        elif history['role'] == 'ai' and number != len(db_history) - 1:
+            result.append(AssistantMessage(content=history['content']))
+    return result
 
 
 async def main():
