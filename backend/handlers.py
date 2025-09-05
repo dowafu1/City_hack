@@ -2,7 +2,7 @@ import re
 import os
 from typing import Optional
 
-from aiogram import types, F
+from aiogram import types, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -548,13 +548,14 @@ async def sub(c: types.CallbackQuery):
     await show_main(c.from_user.id)
 
 
-async def voice_input_to_text(message: types.Message, rec_pipe):
-    voice = await message.voice.get_file()
+async def voice_input_to_text(message: types.Message, rec_pipe, bot: Bot):
+    voice_file = await bot.get_file(message.voice.file_id)
+
     if not os.path.exists('temp'):
         os.mkdir('temp')
-    path = 'temp'
-    open(f'{path}/{voice.fileid}.ogg', 'wb').write(voice.read())
-    text = await recognize(f'{path}/{voice.fileid}.ogg', rec_pipe)
+    await bot.download_file(voice_file.file_path, destination=f'temp/{voice_file.fileid}')
+    text = await recognize(f'temp/{voice_file.fileid}.ogg', rec_pipe)
+    print(f'Распознанный текст: {text}')
     message.text = text
     await handle_ai_chat(message, another_text=text)
 
