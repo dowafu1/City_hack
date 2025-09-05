@@ -35,7 +35,6 @@ async def main():
   Config.load_env()
   BOT_TOKEN, SBER_TOKEN, MISTRAL_TOKEN, ADMIN_IDS = Config.get_required_env_vars()
 
-  # Инициализация голосового распознавателя
   init_voice_recognizer()
 
   sber_client = (
@@ -52,7 +51,6 @@ async def main():
   if mistral_client:
     print("✅ Mistral клиент инициализирован")
 
-  # Инициализация bot_core
   bot_core.ai_chain = AIChain(sber_client, mistral_client)
   bot_core.msg_manager = MessageManager(Bot(token=BOT_TOKEN))
   bot_core.ADMIN_IDS = ADMIN_IDS
@@ -62,16 +60,16 @@ async def main():
 
   dp.callback_query.middleware(AnswerCallbackMiddleware())
   dp.message.middleware(ThrottlingMiddleware())
+
   dp.message.register(start, Command("start"))
   dp.message.register(stop_ai_chat, Command("stop"))
+
   dp.message.register(handle_ai_chat, AIChatForm.chat)
   dp.message.register(choose_role, RoleForm.role)
   dp.message.register(save_question_handler, QuestionForm.question)
-  dp.callback_query.register(tip, F.data == "tip")
-  dp.callback_query.register(sub, F.data == "sub")
-  dp.message.register(voice_input_to_text, F.voice)  # Убран лишний аргумент
-  dp.callback_query.register(back, F.data == "back")
-  dp.callback_query.register(admin, F.data == "admin")
+
+  dp.message.register(voice_input_to_text, F.voice)
+
   dp.message.register(sos_direct, F.text == "🚨 Тревожная кнопка")
 
   callback_map = {
