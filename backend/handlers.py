@@ -10,8 +10,8 @@ from db import (
   save_question, toggle_subscription, get_user_chat_history
 )
 
+from ai.voice_recognition import recognize
 from config import WELCOME_TEXT, INFO_TEXT
-from ai.voice_recognition import recognize_init
 
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
@@ -132,38 +132,38 @@ async def admin_command(m: types.Message, state: FSMContext):
     if m.from_user.id not in get_admin_ids():
         await m.answer("Доступ запрещён")
         return
-    
+
     # Создаем временный callback для вызова admin
     temp_callback = types.CallbackQuery(
-        id="temp", 
-        from_user=m.from_user, 
-        chat_instance="temp", 
-        message=m, 
+        id="temp",
+        from_user=m.from_user,
+        chat_instance="temp",
+        message=m,
         data="admin"
     )
     await admin(temp_callback, state)
 
 
 async def choose_role(m: types.Message, state: FSMContext):
-    text = m.text.strip().lower()
-    if "тревожная кнопка" in text or "🚨" in text:
-        await state.clear()
-        # Создаем временный callback query для вызова sos
-        temp_callback = types.CallbackQuery(
-            id="temp", 
-            from_user=m.from_user, 
-            chat_instance="temp", 
-            message=m, 
-            data="sos"
-        )
-        await sos(temp_callback)
-        return
-    role = "teen" if "подросток" in text else "adult"
-    await set_role(m.from_user.id, role)
+  text = m.text.strip().lower()
+  if "тревожная кнопка" in text or "🚨" in text:
     await state.clear()
-    kb = get_persistent_keyboard()
-    await m.reply("Спасибо за выбор. Я учту это, чтобы лучше помогать.", reply_markup=kb)
-    await show_main(m.from_user.id, greeting=True)
+    # Создаем временный callback query для вызова sos
+    temp_callback = types.CallbackQuery(
+      id="temp",
+      from_user=m.from_user,
+      chat_instance="temp",
+      message=m,
+      data="sos"
+    )
+    await sos(temp_callback)
+    return
+  role = "teen" if "подросток" in text else "adult"
+  await set_role(m.from_user.id, role)
+  await state.clear()
+  kb = get_persistent_keyboard()
+  await m.reply("Спасибо за выбор. Я учту это, чтобы лучше помогать.", reply_markup=kb)
+  await show_main(m.from_user.id, greeting=True)
 
 
 async def change_role(c: types.CallbackQuery, state: FSMContext):
@@ -406,20 +406,20 @@ async def cluster_6_help(c: types.CallbackQuery):
 async def ai_support(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
     await log_action(c.from_user.id, "ai_support")
-    
+
     # Очищаем предыдущую историю чата при начале нового диалога
     from db import delete_chat_history
     await delete_chat_history(c.from_user.id)
-    
+
     text = (
         "💬 Привет! Я — цифровой помощник. Спрашивай, что волнует — помогу разобраться.\n\n"
         "Напиши свой вопрос или просто поделись тем, что на душе. Я отвечу в течение минуты.\n\n"
         "Чтобы завершить диалог, отправь команду /stop"
     )
-    
+
     # Удаляем предыдущее сообщение с меню
     await get_msg_manager().safe_delete(c.from_user.id)
-    
+
     # Отправляем новое сообщение
     await c.message.answer(text)
     await state.set_state(AIChatForm.chat)
@@ -446,25 +446,24 @@ async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_tex
     # Отправляем сообщение о том, что ИИ думает
     thinking_msg = await m.answer("🤔 Думаю над ответом...")
 
-    try:
-        # Получаем ответ от ИИ
-        ai_response = await get_ai_chain().process_query(user_message, history)
+    # Получаем ответ от ИИ
+    ai_response = await get_ai_chain().process_query(user_message, history)
 
-        if ai_response:
-            # Добавляем ответ ИИ в историю (только во время активного диалога)
-            await add_chat_message(user_id, "ai", ai_response)
+    if ai_response:
+        # Добавляем ответ ИИ в историю (только во время активного диалога)
+        await add_chat_message(user_id, "ai", ai_response)
 
-            # Удаляем сообщение "Думаю над ответом"
-            await m.bot.delete_message(chat_id=user_id, message_id=thinking_msg.message_id)
+        # Удаляем сообщение "Думаю над ответом"
+        await m.bot.delete_message(chat_id=user_id, message_id=thinking_msg.message_id)
 
-            # Отправляем ответ
-            await m.answer(ai_response)
-        else:
-            await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
+        # Отправляем ответ
+        await m.answer(ai_response, parse_mode='Markdown')
+    else:
+        await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
 
-    except Exception as e:
-        print(f"Ошибка в AI чате: {e}")
-        await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
+  # except Exception as e:
+  #   print(f"Ошибка в AI чате: {str(e)}")
+  #   await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
 
 
 async def stop_ai_chat(m: types.Message, state: FSMContext):
@@ -610,15 +609,17 @@ async def sub(c: types.CallbackQuery):
   await show_main(c.from_user.id)
 
 
-async def voice_input_to_text(message: types.Message, rec_pipe, bot: Bot):
+async def voice_input_to_text(message: types.Message, state, rec_pipe, bot: Bot):
+    # if not message.voice:
+    #     await handle_ai_chat(message)
+    #     return
     voice_file = await bot.get_file(message.voice.file_id)
 
     if not os.path.exists('temp'):
         os.mkdir('temp')
-    await bot.download_file(voice_file.file_path, destination=f'temp/{voice_file.fileid}')
-    text = await recognize(f'temp/{voice_file.fileid}.ogg', rec_pipe)
+    await bot.download_file(voice_file.file_path, destination=f'temp/{voice_file.file_id}.ogg')
+    text = await recognize(f'temp/{voice_file.file_id}.ogg', rec_pipe)
     print(f'Распознанный текст: {text}')
-    message.text = text
     await handle_ai_chat(message, another_text=text)
 
 

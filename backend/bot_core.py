@@ -7,10 +7,9 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup
 from langchain_gigachat.chat_models import GigaChat
 from mistralai import Mistral
-from pathlib import Path
 from aiogram import types
-from db import get_due_subscribers, reset_subscriptions, get_tip, upsert_contact, upsert_sos, upsert_event, \
-  upsert_article, upsert_tip, get_user_chat_history
+from db import get_due_subscribers, reset_subscriptions, get_tip
+from ai.ai_chain import chainize
 
 from config import PresetManager
 
@@ -19,130 +18,24 @@ class AIChain:
   def __init__(self, sber_client: Optional[GigaChat] = None, mistral_client: Optional[Mistral] = None):
     self.sber = sber_client
     self.mistral = mistral_client
-    self.presets = PresetManager.load_presets()
+    self.prepromts = PresetManager.load_presets()
 
   async def process_query(self, user_prompt: str, history: List) -> Optional[str]:
     print(f"Получен запрос от пользователя: {user_prompt}")
     print(f"История чата: {len(history)} сообщений")
 
-    try:
-      context = await self._load_context()
-      sber_prompt = self._build_prompt('gigachat_prompt', context)
-      print("Отправляем запрос в SberAI...")
-
-      # Формируем сообщения для ИИ на основе истории
-      messages = [{"role": "system", "content": sber_prompt}]
-
-      # Добавляем историю чата (только последние 10 сообщений)
-      for msg in history[-10:]:
-        role = "user" if msg["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": msg["content"]})
-
-      # Добавляем текущее сообщение пользователя
-      messages.append({"role": "user", "content": user_prompt})
-
-      sber_response = await self._call_sber_with_messages(messages)
-      print(f"Получен ответ от SberAI: {sber_response[:50]}..." if sber_response else "No response")
-
-      if not sber_response:
-        return "Извините, SberAI не дал ответ. Попробуйте переформулировать вопрос."
-
-      if self.mistral:
-        try:
-          print("Отправляем запрос в Mistral для улучшения...")
-          mistral_prompt = self._build_prompt('mistral_summarize_prompt', context)
-          mistral_response = await self._call_mistral(
-            f'Клиент: {user_prompt}, Предложенный вариант ответа: {sber_response}',
-            mistral_prompt
-          )
-          final_response = mistral_response or sber_response
-          print(f"Получен улучшенный ответ от Mistral: {final_response[:50]}...")
-        except Exception as e:
-          print(f'Ошибка Mistral (не критично): {e}')
-          final_response = sber_response
-      else:
-        final_response = sber_response
-
-      print(f"Финальный ответ: {final_response[:100]}...")
-      return final_response
-
-    except Exception as e:
-      print(f'Ошибка SberAI в chainize: {e}')
-      return "Извините, возникла техническая ошибка. Попробуйте позже."
-
-  async def _call_sber_with_messages(self, messages: List[Dict]) -> Optional[str]:
-    """Вызов SberAI с готовым списком сообщений"""
-    if not self.sber:
-      return "Сервис ИИ временно недоступен. Пожалуйста, попробуйте позже."
-    try:
-      response = self.sber.chat(messages)
-      return response.choices[0].message.content
-    except Exception as e:
-      print(f'Ошибка вызова SberAI: {e}')
-      return None
+    chainized_resposnse = await chainize(user_prompt, history, self.sber, self.mistral, self.prepromts)
+    return chainized_resposnse
 
   async def generate_tip(self, prev_tips: Optional[List[str]] = None) -> Optional[str]:
-    try:
-      tip_prompt = self.presets.get('tip_prompt', '')
-      if prev_tips:
-        prev_tips_str = "&".join(prev_tips)
-        tip_prompt += f' Твои предыдущие советы (разделены &): {prev_tips_str}.'
-      return await self._call_sber('', [], tip_prompt)
-    except Exception as e:
-      print(f'Ошибка SberAI в get_tip: {e}')
-      return None
-
-  async def _load_context(self) -> Optional[Dict[str, str]]:
-    context_dir = Path('context')
-    if not context_dir.exists():
-      return None
-    texts = {}
-    try:
-      for file_path in context_dir.glob('*.txt'):
-        try:
-          content = file_path.read_text(encoding='utf-8')
-          texts[file_path.name] = content
-        except Exception as e:
-          print(f"Ошибка чтения файла {file_path}: {e}")
-      return texts if texts else None
-    except Exception as e:
-      print(f"Ошибка при чтении контекстных файлов: {e}")
-      return None
-
-  def _build_prompt(self, preset_key: str, context: Optional[Dict[str, str]]) -> str:
-    prompt = self.presets.get(preset_key, '')
-    if context:
-      context_lines = [f'Файл "{key}", содержание: {value}' for key, value in context.items()]
-      prompt += f'\n\nКонтекстная информация:\n{" ".join(context_lines)}'
-    return prompt
-
-  async def _call_sber(self, prompt: str, history: List, system_prompt: str) -> Optional[str]:
-    if not self.sber:
-      return "Сервис ИИ временно недоступен. Пожалуйста, попробуйте позже."
-    try:
-      messages = [{"role": "system", "content": system_prompt}]
-      for msg in history[-10:]:
-        role = "user" if msg["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": msg["content"]})
-      messages.append({"role": "user", "content": prompt})
-      response = self.sber.chat(messages)
-      return response.choices[0].message.content
-    except Exception as e:
-      print(f'Ошибка вызова SberAI: {e}')
-      return None
-
-  async def _call_mistral(self, prompt: str, system_prompt: str) -> Optional[str]:
-    if not self.mistral:
-      return None
-    try:
-      messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt}
-      ]
-      response = self.mistral.chat.complete(model="mistral-small-latest", messages=messages)
-      return response.choices[0].message.content
-    except Exception as e:
-      print(f'Ошибка вызова Mistral: {e}')
+    # try:
+    #   tip_prompt = self.presets.get('tip_prompt', '')
+    #   if prev_tips:
+    #     prev_tips_str = "&".join(prev_tips)
+    #     tip_prompt += f' Твои предыдущие советы (разделены &): {prev_tips_str}.'
+    #   return await self._call_sber('', [], tip_prompt)
+    # except Exception as e:
+    #   print(f'Ошибка SberAI в get_tip: {e}')
       return None
 
 
