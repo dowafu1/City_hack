@@ -5,10 +5,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from mistralai import Mistral
 from langchain_gigachat.chat_models import GigaChat
 
-from backend.handlers import voice_input_to_text
+from handlers import voice_input_to_text
 from db import init_db, upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip
 
 from ai.voice_recognition import recognize_init
+
 from db import (
   init_db, upsert_contact, upsert_sos,
   upsert_event, upsert_article, upsert_tip
@@ -64,12 +65,17 @@ from handlers import (
   ai_support, contacts, sos, sos_direct, events,
   question, save_question_handler, tip, sub, back, admin,
   RoleForm, QuestionForm, AdminForm, AIChatForm,
-  stop_ai_chat, handle_ai_chat, voice_input_to_text
+  stop_ai_chat, handle_ai_chat, voice_input_to_text,
+  help_command, menu_command, sos_command, admin_command
 )
 
 dp.callback_query.middleware(AnswerCallbackMiddleware())
 dp.message.middleware(ThrottlingMiddleware())
 dp.message.register(start, Command("start"))
+dp.message.register(help_command, Command("help"))
+dp.message.register(menu_command, Command("menu"))
+dp.message.register(sos_command, Command("sos"))
+dp.message.register(admin_command, Command("admin"))
 dp.message.register(stop_ai_chat, Command("stop"))
 dp.message.register(handle_ai_chat, AIChatForm.chat)
 dp.message.register(choose_role, RoleForm.role)
