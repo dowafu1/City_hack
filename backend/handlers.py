@@ -327,6 +327,10 @@ async def ai_support(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
     await log_action(c.from_user.id, "ai_support")
     
+    # Очищаем предыдущую историю чата при начале нового диалога
+    from db import delete_chat_history
+    await delete_chat_history(c.from_user.id)
+
     text = (
         "💬 Привет! Я — цифровой помощник. Спрашивай, что волнует — помогу разобраться.\n\n"
         "Напиши свой вопрос или просто поделись тем, что на душе. Я отвечу в течение минуты.\n\n"
@@ -356,7 +360,7 @@ async def handle_ai_chat(m: types.Message, state: FSMContext=None, another_text:
     else:
         user_message = another_text
     
-    # Добавляем сообщение пользователя в историю
+    # Добавляем сообщение пользователя в историю (только во время активного диалога)
     await add_chat_message(user_id, "user", user_message)
     
     # Получаем историю чата
@@ -370,7 +374,7 @@ async def handle_ai_chat(m: types.Message, state: FSMContext=None, another_text:
         ai_response = await ai_chain.process_query(user_message, history)
         
         if ai_response:
-            # Добавляем ответ ИИ в историю
+            # Добавляем ответ ИИ в историю (только во время активного диалога)
             await add_chat_message(user_id, "ai", ai_response)
             
             # Удаляем сообщение "Думаю над ответом"
@@ -384,6 +388,19 @@ async def handle_ai_chat(m: types.Message, state: FSMContext=None, another_text:
     except Exception as e:
         print(f"Ошибка в AI чате: {e}")
         await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
+
+async def stop_ai_chat(m: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == AIChatForm.chat.state:
+        # Удаляем всю историю чата при завершении диалога
+        from db import delete_chat_history
+        await delete_chat_history(m.from_user.id)
+
+        await state.clear()
+        await m.answer("💬 Диалог с ИИ завершен. Вся история диалога удалена. Возвращаюсь в главное меню.")
+        await show_main(m.from_user.id)
+    else:
+        await m.answer("Сейчас нет активного диалога с ИИ.")
 
 async def contacts(c: types.CallbackQuery):
     await c.answer()

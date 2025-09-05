@@ -25,14 +25,29 @@ class AIChain:
     async def process_query(self, user_prompt: str, history: List) -> Optional[str]:
         print(f"Получен запрос от пользователя: {user_prompt}")
         print(f"История чата: {len(history)} сообщений")
+        
         try:
             context = await self._load_context()
             sber_prompt = self._build_prompt('gigachat_prompt', context)
             print("Отправляем запрос в SberAI...")
-            sber_response = await self._call_sber(user_prompt, history, sber_prompt)
+            
+            # Формируем сообщения для ИИ на основе истории
+            messages = [{"role": "system", "content": sber_prompt}]
+            
+            # Добавляем историю чата (только последние 10 сообщений)
+            for msg in history[-10:]:
+                role = "user" if msg["role"] == "user" else "assistant"
+                messages.append({"role": role, "content": msg["content"]})
+            
+            # Добавляем текущее сообщение пользователя
+            messages.append({"role": "user", "content": user_prompt})
+            
+            sber_response = await self._call_sber_with_messages(messages)
             print(f"Получен ответ от SberAI: {sber_response[:50]}..." if sber_response else "No response")
+            
             if not sber_response:
                 return "Извините, SberAI не дал ответ. Попробуйте переформулировать вопрос."
+            
             if self.mistral:
                 try:
                     print("Отправляем запрос в Mistral для улучшения...")
@@ -48,11 +63,24 @@ class AIChain:
                     final_response = sber_response
             else:
                 final_response = sber_response
+            
             print(f"Финальный ответ: {final_response[:100]}...")
             return final_response
+        
         except Exception as e:
             print(f'Ошибка SberAI в chainize: {e}')
             return "Извините, возникла техническая ошибка. Попробуйте позже."
+
+    async def _call_sber_with_messages(self, messages: List[Dict]) -> Optional[str]:
+        """Вызов SberAI с готовым списком сообщений"""
+        if not self.sber:
+            return "Сервис ИИ временно недоступен. Пожалуйста, попробуйте позже."
+        try:
+            response = self.sber.chat(messages)
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f'Ошибка вызова SberAI: {e}')
+            return None
 
     async def generate_tip(self, prev_tips: Optional[List[str]] = None) -> Optional[str]:
         try:

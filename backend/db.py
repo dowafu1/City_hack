@@ -126,6 +126,14 @@ async def get_user_chat_history(user_id: int) -> list[dict]:
       for row in rows
     ]
 
+async def delete_chat_history(chat_id: int):
+    """Удаляет всю историю чата для указанного chat_id"""
+    async with get_conn() as conn:
+        await conn.execute(
+            "DELETE FROM chat_history WHERE chat_id = $1",
+            chat_id
+        )
+
 
 async def get_articles(category: str) -> list[tuple]:
   async with get_conn() as conn:
