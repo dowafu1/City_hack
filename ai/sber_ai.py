@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_gigachat.chat_models import GigaChat
 
 
@@ -14,6 +14,16 @@ async def make_chat(client: GigaChat,
     res = client.invoke(messages)
 
     return res.content
+
+
+async def make_history(db_history: list[dict[str, str]]) -> list:
+    result = []
+    for number, history in enumerate(db_history):
+        if history['role'] == 'user' and number != len(db_history) - 1:
+            result.append(HumanMessage(content=history['content']))
+        elif history['role'] == 'ai' and number != len(db_history) - 1:
+            result.append(AIMessage(content=history['content']))
+    return result
 
 
 async def main():

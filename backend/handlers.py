@@ -461,10 +461,6 @@ async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_tex
     else:
         await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
 
-  # except Exception as e:
-  #   print(f"Ошибка в AI чате: {str(e)}")
-  #   await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
-
 
 async def stop_ai_chat(m: types.Message, state: FSMContext):
     current_state = await state.get_state()
