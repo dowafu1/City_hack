@@ -82,7 +82,15 @@ async def choose_role(m: types.Message, state: FSMContext):
     text = m.text.strip().lower()
     if "тревожная кнопка" in text or "🚨" in text:
         await state.clear()
-        await sos(types.CallbackQuery(id="temp", from_user=m.from_user, chat_instance="temp", message=m, data="sos"))
+        # Создаем временный callback query для вызова sos
+        temp_callback = types.CallbackQuery(
+            id="temp", 
+            from_user=m.from_user, 
+            chat_instance="temp", 
+            message=m, 
+            data="sos"
+        )
+        await sos(temp_callback)
         return
     role = "teen" if "подросток" in text else "adult"
     await set_role(m.from_user.id, role)
@@ -92,6 +100,7 @@ async def choose_role(m: types.Message, state: FSMContext):
     await show_main(m.from_user.id, greeting=True)
 
 async def change_role(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()
     await log_action(c.from_user.id, "change_role")
     await get_msg_manager().safe_delete(c.from_user.id)
     kb = types.ReplyKeyboardMarkup(
@@ -103,6 +112,7 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
     await state.set_state(RoleForm.role)
 
 async def navigator(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "navigator")
     await add_chat_message(c.message.chat.id, "user", "navigator")
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -122,6 +132,7 @@ async def navigator(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_1(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "cluster_1")
     text = (
         "😔 *Депрессивные настроения*\n\n"
@@ -137,6 +148,7 @@ async def cluster_1(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_1_help(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "cluster_1_help")
     text = (
         "🧠 *Первая помощь при депрессивных настроениях*\n\n"
@@ -153,12 +165,13 @@ async def cluster_1_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_2(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "cluster_2")
     text = (
         "⚠️ *Суицидальные мысли*\n\n"
         "Если ты думаешь о том, чтобы уйти из жизни — это не значит, что ты слаб.\n\n"
         "Это значит, что тебе *очень тяжело*, и ты больше не видишь выхода.\n\n"
-        "Но выход есть. Есть люди, которые помогут. Ты важен — даже если сейчас кажется инача."
+        "Но выход есть. Есть люди, которые помогут. Ты важен — даже если сейчас кажется иначе."
     )
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="⚡️ Первые действия", callback_data="cluster_2_help")],
@@ -168,11 +181,12 @@ async def cluster_2(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_2_help(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "cluster_2_help")
     text = (
         "🚨 *Первая помощь при суицидальных мыслях*\n\n"
         "1. **Не оставайся наедине с собой.** Напиши, позвони — хоть кому-то.\n\n"
-        "2. **Используй тревожную кнопка.** Ты получишь контакты, где тебя выслушают *прямо сейчас*.\n\n"
+        "2. **Используй тревожную кнопку.** Ты получишь контакты, где тебя выслушают *прямо сейчас*.\n\n"
         "3. **Запиши, что чувствуешь.** Это поможет разгрузить голову и понять, что именно болит.\n\n"
         "Ты не обязан справляться один. Есть те, кто готов помочь."
     )
@@ -184,6 +198,7 @@ async def cluster_2_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_3(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "cluster_3")
     text = (
         "💢 *Агрессия и раздражение*\n\n"
@@ -199,6 +214,7 @@ async def cluster_3(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_3_help(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🧘 *Первая помощь при агрессии*\n\n"
         "1. **Остановись.** Если чувствуешь, что срываешься — уйди, дыши, посчитай до 10.\n\n"
@@ -214,6 +230,7 @@ async def cluster_3_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_4(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🍽️ *Проблемы с едой*\n\n"
         "Когда еда становится врагом, навязчивой идеей или способом контролировать себя — это тревожный звоночек.\n\n"
@@ -228,6 +245,7 @@ async def cluster_4(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_4_help(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🥗 *Первая помощь при проблемах с едой*\n\n"
         "1. **Не сравнивай себя с другим.** Ты не должен «выглядеть» определённо, чтобы быть больным.\n\n"
@@ -243,6 +261,7 @@ async def cluster_4_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_5(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🫂 *Половое воспитание*\n\n"
         "Вопросы о теле, менструациях, сексуальности, отношениях — это нормально.\n\n"
@@ -257,6 +276,7 @@ async def cluster_5(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_5_help(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🛡️ *Первая помощь: половое воспитание*\n\n"
         "1. **Знай свои границы.** Ты вправе сказать «нет» — в любой ситуации, с кем угодно.\n\n"
@@ -272,6 +292,7 @@ async def cluster_5_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_6(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "👥 *Сложности в общении*\n\n"
         "Бывает тяжело находить общий язык: с родителями, друзьями, в отношениях.\n\n"
@@ -286,6 +307,7 @@ async def cluster_6(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def cluster_6_help(c: types.CallbackQuery):
+    await c.answer()
     text = (
         "🗣️ *Первая помощь в общении*\n\n"
         "1. **Говори о своих чувствах.** Используй «Я-высказывания»: *«Мне было обидно, когда…»*, а не *«Ты всегда…»*.\n\n"
@@ -301,6 +323,7 @@ async def cluster_6_help(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def ai_support(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "ai_support")
     text = (
         "💬 Привет! Я — цифровой помощник. Спрашивай, что волнует — помогу разобраться.\n\n"
@@ -314,6 +337,7 @@ async def ai_support(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def contacts(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "contacts")
     rows = await get_contacts()
     text = "Контакты пока не добавлены. Администратор может добавить их через панель." if not rows else "\n\n".join(
@@ -323,36 +347,46 @@ async def contacts(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
 async def sos(c: types.CallbackQuery):
+    await c.answer()
     await log_action(c.from_user.id, "sos")
-    text = await get_sos()
-    if not text.strip():
-        text = (
-            "🆘 *Тревожная кнопка активирована*\n\n"
-            "Если тебе угрожают или ты в опасности:\n"
-            "• [Позвонить 112](tel:112) — экстренные службы\n"
-            "• [Позвонить 102](tel:102) — полиция\n"
-            "• [Детский телефон доверия 8-800-2000-122](tel:88002000122) — круглосуточно и анонимно\n\n"
-            "Оставайся на линии. Ты не один."
-        )
+    text = (
+        "🚨 *Тревожная ситуация*\n\n"
+        "Если вы в опасности или не справляетесь — вот что можно сделать прямо сейчас:\n\n"
+        "📞 *Экстренные службы Томской области*\n"
+        "• [Позвонить в полицию: 102](tel:102) или +7(3822)XXX-XX-XX\n"
+        "• [Детский телефон доверия (круглосуточно): 8-800-2000-122](tel:88002000122)\n"
+        "• Психологическая служба Томска: +7(3822)XXX-XX-XX\n\n"
+        "💡 Сохраните эти номера. Звоните — вас не осудят.\n\n"
+        "---\n\n"
+        "📬 *Связь со специалистом ЦМП*\n"
+        "Если хотите — можете анонимно описать ситуацию. "
+        "Сообщение будет передано специалисту в приоритетном порядке. "
+        "Ответ пришлём в течение 1–2 часов (в рабочее время) или до 24 часов."
+    )
     kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
 
 async def sos_direct(m: types.Message):
     await log_action(m.from_user.id, "sos_direct")
-    text = await get_sos()
-    if not text.strip():
-        text = (
-            "🆘 *Тревожная кнопка активирована*\n\n"
-            "Если тебе угрожают или ты в опасности:\n"
-            "• [Позвонить 112](tel:112) — экстренные службы\n"
-            "• [Позвонить 102](tel:102) — полиция\n"
-            "• [Детский телефон доверия 8-800-2000-122](tel:88002000122) — круглосуточно и анонимно\n\n"
-            "Оставайся на линии. Ты не один."
-        )
+    text = (
+        "🚨 *Тревожная ситуация*\n\n"
+        "Если вы в опасности или не справляетесь — вот что можно сделать прямо сейчас:\n\n"
+        "📞 *Экстренные службы Томской области*\n"
+        "• [Позвонить в полицию: 102](tel:102) или +7(3822)XXX-XX-XX\n"
+        "• [Детский телефон доверия (круглосуточно): 8-800-2000-122](tel:88002000122)\n"
+        "• Психологическая служба Томска: +7(3822)XXX-XX-XX\n\n"
+        "💡 Сохраните эти номера. Звоните — вас не осудят.\n\n"
+        "---\n\n"
+        "📬 *Связь со специалистом ЦМП*\n"
+        "Если хотите — можете анонимно описать ситуацию. "
+        "Сообщение будет передано специалисту в приоритетном порядке. "
+        "Ответ пришлём в течение 1–2 часов (в рабочее время) или до 24 часов."
+    )
     kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(m.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
 
 async def events(c: types.CallbackQuery):
+    await c.answer()
     rows = await get_events()
     text = "Пока нет запланированных мероприятий. Следи за обновлениями!" if not rows else "\n\n".join(
         f"*{title}* ({date})\n{description}\n[Подробнее]({link})" for title, date, description, link in rows
@@ -361,30 +395,43 @@ async def events(c: types.CallbackQuery):
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
 
 async def question(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()  # ОБЯЗАТЕЛЬНО отвечаем на callback сразу
     await log_action(c.from_user.id, "question")
+    
+    # Удаляем предыдущее сообщение с меню
     await get_msg_manager().safe_delete(c.from_user.id)
+    
     response_text = (
         "Напиши, что тебя беспокоит. Я передам вопрос специалистам.\n\n"
         "Ты можешь остаться анонимным — твоё имя не передаётся."
     )
-    msg = await c.message.answer(response_text)
-    get_msg_manager().update(c.from_user.id, msg.message_id)
+    # Отправляем новое сообщение, а не редактируем существующее
+    await c.message.answer(response_text)
     await state.set_state(QuestionForm.question)
 
 async def save_question_handler(m: types.Message, state: FSMContext):
     await add_chat_message(m.chat.id, "user", m.text)
     await save_question(m.from_user.id, m.text)
+    
     response = (
         "Спасибо, что доверил мне свой вопрос.\n\n"
         "Я передал его специалистам. Если понадобится — они свяжутся через этого бота.\n\n"
         "Ты сделал важный шаг. Я рядом."
     )
-    confirmation_msg = await m.answer(response)
+    # Отправляем подтверждение как новое сообщение
+    await m.answer(response)
     await add_chat_message(m.chat.id, "ai", response)
     await state.clear()
+    
+    # Ждем немного перед показом меню (опционально)
+    import asyncio
+    await asyncio.sleep(1)
+    
+    # Показываем главное меню как новое сообщение
     await show_main(m.from_user.id)
 
 async def tip(c: types.CallbackQuery):
+    await c.answer()
     text = await get_tip()
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="🔄 Другой совет", callback_data="tip")],
@@ -397,18 +444,21 @@ async def tip(c: types.CallbackQuery):
     )
 
 async def sub(c: types.CallbackQuery):
+    await c.answer()  # Отвечаем на callback сразу
     success = await toggle_subscription(c.from_user.id)
     response = "💚 Спасибо, что остаёшься на связи! Каждый день в это же время я буду присылать тебе тёплый совет." if success else "Хорошо, я не буду беспокоить. Но помни — ты всегда можешь вернуться. Я здесь, когда захочешь."
-    await c.answer(response, show_alert=True)
+    await c.message.answer(response)
     await show_main(c.from_user.id)
 
 async def back(c: types.CallbackQuery):
+    await c.answer()  # Отвечаем на callback
     await log_action(c.from_user.id, "back_to_main")
     await show_main(c.from_user.id)
 
 async def admin(c: types.CallbackQuery, state: FSMContext):
+    await c.answer()
     if c.from_user.id not in get_admin_ids():
-        await c.answer("Доступ запрещён", show_alert=True)
+        await c.message.answer("Доступ запрещён")
         return
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="📒 Контакты", callback_data="ad_contacts")],

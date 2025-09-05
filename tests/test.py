@@ -40,7 +40,7 @@ RoleForm = type('RoleForm', (StatesGroup,), {'role': State()})
 QuestionForm = type('QuestionForm', (StatesGroup,), {'question': State()})
 AdminForm = type('AdminForm', (StatesGroup,), {'section': State(), 'payload': State()})
 
-from backend.bot import (
+from frontend.bot import (
   ThrottlingMiddleware,
   db,
   init_db,
