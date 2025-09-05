@@ -17,7 +17,7 @@ from handlers import (
     start, choose_role, change_role, navigator, cluster_1, cluster_1_help, cluster_2, cluster_2_help,
     cluster_3, cluster_3_help, cluster_4, cluster_4_help, cluster_5, cluster_5_help, cluster_6, cluster_6_help,
     ai_support, contacts, sos, sos_direct, events, question, save_question_handler, tip, sub, back, admin,
-    RoleForm, QuestionForm, AdminForm, AIChatForm
+    RoleForm, QuestionForm, AdminForm, AIChatForm, stop_ai_chat, handle_ai_chat
 )
 
 Config.load_env()
@@ -42,6 +42,8 @@ dp.callback_query.middleware(AnswerCallbackMiddleware())
 dp.message.middleware(ThrottlingMiddleware())
 
 dp.message.register(start, Command(commands=["start"]))
+dp.message.register(stop_ai_chat, Command(commands=["stop"]))
+dp.message.register(handle_ai_chat, AIChatForm.chat)
 dp.message.register(choose_role, RoleForm.role)
 dp.callback_query.register(change_role, F.data == "change_role")
 dp.callback_query.register(navigator, F.data == "navigator")
@@ -68,6 +70,7 @@ dp.callback_query.register(tip, F.data == "tip")
 dp.callback_query.register(sub, F.data == "sub")
 dp.callback_query.register(back, F.data == "back")
 dp.callback_query.register(admin, F.data == "admin")
+
 
 async def main():
     await init_db()

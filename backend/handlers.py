@@ -322,19 +322,67 @@ async def cluster_6_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
-async def ai_support(c: types.CallbackQuery):
+async def ai_support(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
     await log_action(c.from_user.id, "ai_support")
+    
     text = (
         "💬 Привет! Я — цифровой помощник. Спрашивай, что волнует — помогу разобраться.\n\n"
-        "Пока что я не могу вести диалог, но скоро это появится.\n"
-        "А пока можешь задать вопрос специалисту — нажми «❓ Задать вопрос»."
+        "Напиши свой вопрос или просто поделись тем, что на душе. Я отвечу в течение минуты.\n\n"
+        "Чтобы завершить диалог, отправь команду /stop"
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="❓ Задать вопрос", callback_data="question")],
-        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
-    ])
-    await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+    
+    # Удаляем предыдущее сообщение с меню
+    await get_msg_manager().safe_delete(c.from_user.id)
+    
+    # Отправляем новое сообщение
+    await c.message.answer(text)
+    await state.set_state(AIChatForm.chat)
+    
+async def stop_ai_chat(m: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == AIChatForm.chat.state:
+        await state.clear()
+        await m.answer("💬 Диалог с ИИ завершен. Возвращаюсь в главное меню.")
+        await show_main(m.from_user.id)
+    else:
+        await m.answer("Сейчас нет активного диалога с ИИ.")
+        
+async def handle_ai_chat(m: types.Message, state: FSMContext):
+    from bot_core import ai_chain
+    from db import get_user_chat_history, add_chat_message
+    
+    user_id = m.from_user.id
+    user_message = m.text
+    
+    # Добавляем сообщение пользователя в историю
+    await add_chat_message(user_id, "user", user_message)
+    
+    # Получаем историю чата
+    history = await get_user_chat_history(user_id)
+    
+    # Отправляем сообщение о том, что ИИ думает
+    thinking_msg = await m.answer("🤔 Думаю над ответом...")
+    
+    try:
+        # Получаем ответ от ИИ
+        ai_response = await ai_chain.process_query(user_message, history)
+        
+        if ai_response:
+            # Добавляем ответ ИИ в историю
+            await add_chat_message(user_id, "ai", ai_response)
+            
+            # Удаляем сообщение "Думаю над ответом"
+            await m.bot.delete_message(chat_id=user_id, message_id=thinking_msg.message_id)
+            
+            # Отправляем ответ
+            await m.answer(ai_response)
+        else:
+            await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
+    
+    except Exception as e:
+        print(f"Ошибка в AI чате: {e}")
+        await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
 
 async def contacts(c: types.CallbackQuery):
     await c.answer()
