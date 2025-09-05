@@ -18,27 +18,34 @@ from ai.voice_recognition import recognize
 
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
+
 # Отложенный импорт
 def get_msg_manager():
     if msg_manager is None:
         raise RuntimeError("MessageManager не инициализирован!")
     return msg_manager
 
+
 def get_admin_ids():
     return ADMIN_IDS
+
 
 class RoleForm(StatesGroup):
     role = State()
 
+
 class QuestionForm(StatesGroup):
     question = State()
+
 
 class AdminForm(StatesGroup):
     section = State()
     payload = State()
 
+
 class AIChatForm(StatesGroup):
     chat = State()
+
 
 def get_persistent_keyboard() -> types.ReplyKeyboardMarkup:
     return types.ReplyKeyboardMarkup(
@@ -46,6 +53,7 @@ def get_persistent_keyboard() -> types.ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=False
     )
+
 
 def main_menu(user_id: int) -> types.InlineKeyboardMarkup:
     buttons = [
@@ -62,10 +70,12 @@ def main_menu(user_id: int) -> types.InlineKeyboardMarkup:
         buttons.append([types.InlineKeyboardButton(text="🛠️ Админ-панель", callback_data="admin")])
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
+
 async def show_main(user_id: int, greeting: bool = False):
     text = INFO_TEXT if greeting else "Чем могу помочь?"
     markup = main_menu(user_id)
     await get_msg_manager().safe_edit_or_send(user_id, text, reply_markup=markup)
+
 
 async def start(m: types.Message, state: FSMContext):
     await log_action(m.from_user.id, "start")
@@ -79,16 +89,17 @@ async def start(m: types.Message, state: FSMContext):
         await m.answer("Привет снова!", reply_markup=kb)
         await show_main(m.from_user.id, greeting=True)
 
+
 async def choose_role(m: types.Message, state: FSMContext):
     text = m.text.strip().lower()
     if "тревожная кнопка" in text or "🚨" in text:
         await state.clear()
         # Создаем временный callback query для вызова sos
         temp_callback = types.CallbackQuery(
-            id="temp", 
-            from_user=m.from_user, 
-            chat_instance="temp", 
-            message=m, 
+            id="temp",
+            from_user=m.from_user,
+            chat_instance="temp",
+            message=m,
             data="sos"
         )
         await sos(temp_callback)
@@ -99,6 +110,7 @@ async def choose_role(m: types.Message, state: FSMContext):
     kb = get_persistent_keyboard()
     await m.reply("Спасибо за выбор. Я учту это, чтобы лучше помогать.", reply_markup=kb)
     await show_main(m.from_user.id, greeting=True)
+
 
 async def change_role(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
@@ -111,6 +123,7 @@ async def change_role(c: types.CallbackQuery, state: FSMContext):
     )
     await c.message.answer("Кто ты? Это поможет мне лучше помогать тебе.", reply_markup=kb)
     await state.set_state(RoleForm.role)
+
 
 async def navigator(c: types.CallbackQuery):
     await c.answer()
@@ -132,6 +145,7 @@ async def navigator(c: types.CallbackQuery):
     )
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_1(c: types.CallbackQuery):
     await c.answer()
     await log_action(c.from_user.id, "cluster_1")
@@ -147,6 +161,7 @@ async def cluster_1(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_1_help(c: types.CallbackQuery):
     await c.answer()
@@ -165,6 +180,7 @@ async def cluster_1_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_2(c: types.CallbackQuery):
     await c.answer()
     await log_action(c.from_user.id, "cluster_2")
@@ -180,6 +196,7 @@ async def cluster_2(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_2_help(c: types.CallbackQuery):
     await c.answer()
@@ -198,6 +215,7 @@ async def cluster_2_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_3(c: types.CallbackQuery):
     await c.answer()
     await log_action(c.from_user.id, "cluster_3")
@@ -213,6 +231,7 @@ async def cluster_3(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_3_help(c: types.CallbackQuery):
     await c.answer()
@@ -230,6 +249,7 @@ async def cluster_3_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_4(c: types.CallbackQuery):
     await c.answer()
     text = (
@@ -244,6 +264,7 @@ async def cluster_4(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_4_help(c: types.CallbackQuery):
     await c.answer()
@@ -261,6 +282,7 @@ async def cluster_4_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_5(c: types.CallbackQuery):
     await c.answer()
     text = (
@@ -275,6 +297,7 @@ async def cluster_5(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_5_help(c: types.CallbackQuery):
     await c.answer()
@@ -292,6 +315,7 @@ async def cluster_5_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def cluster_6(c: types.CallbackQuery):
     await c.answer()
     text = (
@@ -306,6 +330,7 @@ async def cluster_6(c: types.CallbackQuery):
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="navigator")]
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def cluster_6_help(c: types.CallbackQuery):
     await c.answer()
@@ -323,10 +348,11 @@ async def cluster_6_help(c: types.CallbackQuery):
     ])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
 
+
 async def ai_support(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
     await log_action(c.from_user.id, "ai_support")
-    
+
     # Очищаем предыдущую историю чата при начале нового диалога
     from db import delete_chat_history
     await delete_chat_history(c.from_user.id)
@@ -336,58 +362,51 @@ async def ai_support(c: types.CallbackQuery, state: FSMContext):
         "Напиши свой вопрос или просто поделись тем, что на душе. Я отвечу в течение минуты.\n\n"
         "Чтобы завершить диалог, отправь команду /stop"
     )
-    
+
     # Удаляем предыдущее сообщение с меню
     await get_msg_manager().safe_delete(c.from_user.id)
-    
+
     # Отправляем новое сообщение
     await c.message.answer(text)
     await state.set_state(AIChatForm.chat)
-    
-async def stop_ai_chat(m: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == AIChatForm.chat.state:
-        await state.clear()
-        await m.answer("💬 Диалог с ИИ завершен. Возвращаюсь в главное меню.")
-        await show_main(m.from_user.id)
-    else:
-        await m.answer("Сейчас нет активного диалога с ИИ.")
-        
-async def handle_ai_chat(m: types.Message, state: FSMContext=None, another_text: str=None):
+
+
+async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_text: str = None):
     user_id = m.from_user.id
     if another_text is None:  # работа с voice сообщением
         user_message = m.text
     else:
         user_message = another_text
-    
+
     # Добавляем сообщение пользователя в историю (только во время активного диалога)
     await add_chat_message(user_id, "user", user_message)
-    
+
     # Получаем историю чата
     history = await get_user_chat_history(user_id)
-    
+
     # Отправляем сообщение о том, что ИИ думает
     thinking_msg = await m.answer("🤔 Думаю над ответом...")
 
     try:
         # Получаем ответ от ИИ
         ai_response = await ai_chain.process_query(user_message, history)
-        
+
         if ai_response:
             # Добавляем ответ ИИ в историю (только во время активного диалога)
             await add_chat_message(user_id, "ai", ai_response)
-            
+
             # Удаляем сообщение "Думаю над ответом"
             await m.bot.delete_message(chat_id=user_id, message_id=thinking_msg.message_id)
-            
+
             # Отправляем ответ
             await m.answer(ai_response)
         else:
             await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
-    
+
     except Exception as e:
         print(f"Ошибка в AI чате: {e}")
         await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
+
 
 async def stop_ai_chat(m: types.Message, state: FSMContext):
     current_state = await state.get_state()
@@ -402,6 +421,7 @@ async def stop_ai_chat(m: types.Message, state: FSMContext):
     else:
         await m.answer("Сейчас нет активного диалога с ИИ.")
 
+
 async def contacts(c: types.CallbackQuery):
     await c.answer()
     await log_action(c.from_user.id, "contacts")
@@ -409,8 +429,10 @@ async def contacts(c: types.CallbackQuery):
     text = "Контакты пока не добавлены. Администратор может добавить их через панель." if not rows else "\n\n".join(
         f"*{category}*\n{name} — `{phone}`\n_{description}_" for category, name, phone, description in rows
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb)
+
 
 async def sos(c: types.CallbackQuery):
     await c.answer()
@@ -429,8 +451,10 @@ async def sos(c: types.CallbackQuery):
         "Сообщение будет передано специалисту в приоритетном порядке. "
         "Ответ пришлём в течение 1–2 часов (в рабочее время) или до 24 часов."
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
+
 
 async def sos_direct(m: types.Message):
     await log_action(m.from_user.id, "sos_direct")
@@ -448,8 +472,10 @@ async def sos_direct(m: types.Message):
         "Сообщение будет передано специалисту в приоритетном порядке. "
         "Ответ пришлём в течение 1–2 часов (в рабочее время) или до 24 часов."
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(m.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
+
 
 async def events(c: types.CallbackQuery):
     await c.answer()
@@ -457,16 +483,18 @@ async def events(c: types.CallbackQuery):
     text = "Пока нет запланированных мероприятий. Следи за обновлениями!" if not rows else "\n\n".join(
         f"*{title}* ({date})\n{description}\n[Подробнее]({link})" for title, date, description, link in rows
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="back")]])
     await get_msg_manager().safe_edit_or_send(c.from_user.id, text, reply_markup=kb, disable_web_page_preview=True)
+
 
 async def question(c: types.CallbackQuery, state: FSMContext):
     await c.answer()  # ОБЯЗАТЕЛЬНО отвечаем на callback сразу
     await log_action(c.from_user.id, "question")
-    
+
     # Удаляем предыдущее сообщение с меню
     await get_msg_manager().safe_delete(c.from_user.id)
-    
+
     response_text = (
         "Напиши, что тебя беспокоит. Я передам вопрос специалистам.\n\n"
         "Ты можешь остаться анонимным — твоё имя не передаётся."
@@ -475,10 +503,11 @@ async def question(c: types.CallbackQuery, state: FSMContext):
     await c.message.answer(response_text)
     await state.set_state(QuestionForm.question)
 
+
 async def save_question_handler(m: types.Message, state: FSMContext):
     await add_chat_message(m.chat.id, "user", m.text)
     await save_question(m.from_user.id, m.text)
-    
+
     response = (
         "Спасибо, что доверил мне свой вопрос.\n\n"
         "Я передал его специалистам. Если понадобится — они свяжутся через этого бота.\n\n"
@@ -488,13 +517,14 @@ async def save_question_handler(m: types.Message, state: FSMContext):
     await m.answer(response)
     await add_chat_message(m.chat.id, "ai", response)
     await state.clear()
-    
+
     # Ждем немного перед показом меню (опционально)
     import asyncio
     await asyncio.sleep(1)
-    
+
     # Показываем главное меню как новое сообщение
     await show_main(m.from_user.id)
+
 
 async def tip(c: types.CallbackQuery):
     await c.answer()
@@ -508,6 +538,7 @@ async def tip(c: types.CallbackQuery):
         f"💡 *Совет дня:*\n\n{text}\n\nПусть день будет чуть легче.",
         reply_markup=kb
     )
+
 
 async def sub(c: types.CallbackQuery):
     await c.answer()  # Отвечаем на callback сразу
@@ -532,6 +563,7 @@ async def back(c: types.CallbackQuery):
     await c.answer()  # Отвечаем на callback
     await log_action(c.from_user.id, "back_to_main")
     await show_main(c.from_user.id)
+
 
 async def admin(c: types.CallbackQuery, state: FSMContext):
     await c.answer()
