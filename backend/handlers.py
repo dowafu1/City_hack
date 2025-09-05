@@ -90,7 +90,7 @@ async def start(m: types.Message, state: FSMContext):
     await get_msg_manager().safe_edit_or_send(m.from_user.id, WELCOME_TEXT, reply_markup=kb)
     await state.set_state(RoleForm.role)
   else:
-    await m.answer("Привет снова!", reply_markup=kb)
+    await m.answer("Привет снова!\n", reply_markup=kb)
     await show_main(m.from_user.id, greeting=True)
 
 
@@ -407,7 +407,7 @@ async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_tex
       await m.bot.delete_message(chat_id=user_id, message_id=thinking_msg.message_id)
 
       # Отправляем ответ
-      await m.answer(ai_response)
+      await m.answer(ai_response, parse_mode='Markdown')
     else:
       await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
 
