@@ -1,9 +1,7 @@
 import re
 import os
-from typing import Optional
 
 from aiogram import types, F, Bot
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
@@ -12,28 +10,27 @@ from db import (
   save_question, toggle_subscription, get_user_chat_history
 )
 
-from bot_core import ai_chain, msg_manager, ADMIN_IDS
 from config import WELCOME_TEXT, INFO_TEXT
-from ai.voice_recognition import recognize, recognize_init
+from ai.voice_recognition import recognize
 
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
 
 # Отложенный импорт
 def get_msg_manager():
+    from bot_core import msg_manager
     if msg_manager is None:
         raise RuntimeError("MessageManager не инициализирован!")
     return msg_manager
 
-
 def get_ai_chain():
-  from bot_core import ai_chain
-  if ai_chain is None:
-    raise RuntimeError("AIChain не инициализирован!")
-  return ai_chain
-
+    from bot_core import ai_chain
+    if ai_chain is None:
+        raise RuntimeError("AIChain не инициализирован!")
+    return ai_chain
 
 def get_admin_ids():
+    from bot_core import ADMIN_IDS
     return ADMIN_IDS
 
 

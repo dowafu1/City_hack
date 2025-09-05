@@ -21,21 +21,6 @@ from bot_core import (
   notifier
 )
 
-# Импортируем хендлеры ПОСЛЕ инициализации bot_core
-from handlers import (
-  start, choose_role, change_role, navigator,
-  cluster_1, cluster_1_help,
-  cluster_2, cluster_2_help,
-  cluster_3, cluster_3_help,
-  cluster_4, cluster_4_help,
-  cluster_5, cluster_5_help,
-  cluster_6, cluster_6_help,
-  ai_support, contacts, sos, sos_direct, events,
-  question, save_question_handler, tip, sub, back, admin,
-  RoleForm, QuestionForm, AdminForm, AIChatForm,
-  stop_ai_chat, handle_ai_chat, voice_input_to_text
-)
-
 
 # Инициализация голосового распознавателя
 recognizer_pipe = recognize_init()
@@ -65,6 +50,22 @@ bot_core.ADMIN_IDS = ADMIN_IDS
 print(f"✅ ADMIN_IDS инициализирован: {bot_core.ADMIN_IDS}")
 bot = bot_core.msg_manager.bot
 dp = Dispatcher(storage=MemoryStorage())
+
+
+# Импортируем хендлеры ПОСЛЕ инициализации bot_core
+from handlers import (
+  start, choose_role, change_role, navigator,
+  cluster_1, cluster_1_help,
+  cluster_2, cluster_2_help,
+  cluster_3, cluster_3_help,
+  cluster_4, cluster_4_help,
+  cluster_5, cluster_5_help,
+  cluster_6, cluster_6_help,
+  ai_support, contacts, sos, sos_direct, events,
+  question, save_question_handler, tip, sub, back, admin,
+  RoleForm, QuestionForm, AdminForm, AIChatForm,
+  stop_ai_chat, handle_ai_chat, voice_input_to_text
+)
 
 dp.callback_query.middleware(AnswerCallbackMiddleware())
 dp.message.middleware(ThrottlingMiddleware())
