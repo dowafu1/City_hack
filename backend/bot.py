@@ -1,8 +1,10 @@
 import os
 import re
 import asyncio
+import json
 from datetime import timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Tuple
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -16,12 +18,200 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
 
+# Импорты для ИИ
+from mistralai import Mistral
+from mistralai.models.sdkerror import SDKError
+from langchain_gigachat.chat_models import GigaChat
+
 from db import (
     init_db, log_action, get_role, set_role, add_chat_message,
     get_contacts, get_sos, get_events, get_tip, save_question,
     upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip,
-    get_due_subscribers, reset_subscriptions, toggle_subscription
+    get_due_subscribers, reset_subscriptions, toggle_subscription,
+    get_user_chat_history
 )
+
+# === Configuration ===
+class Config:
+    @staticmethod
+    def load_env() -> None:
+        dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+        if not os.path.exists(dotenv_path):
+            print(f"❌ Файл .env не найден по пути: {dotenv_path}")
+            exit(1)
+        
+        load_dotenv(dotenv_path)
+        print(f"✅ Переменные окружения загружены из: {dotenv_path}")
+
+    @staticmethod
+    def get_required_env_vars() -> Tuple[str, str, str, set]:
+        bot_token = os.getenv("BOT_TOKEN")
+        sber_token = os.getenv("SBER_TOKEN")
+        mistral_token = os.getenv("MISTRAL_TOKEN")
+        admin_ids = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x.strip()}
+
+        if not bot_token:
+            raise ValueError("❌ Необходимо задать BOT_TOKEN в .env")
+
+        return bot_token, sber_token, mistral_token, admin_ids
+
+
+# === Preset Management ===
+class PresetManager:
+    DEFAULT_PRESETS = {
+        'gigachat_prompt': "Ты цифровой помощник психолог. Отвечай кратко, по делу, с эмпатией.",
+        'mistral_summarize_prompt': "Проверь и улучши ответ, сделай его более полезным и точным.",
+        'tip_prompt': "Сгенерируй полезный психологический совет для подростка или взрослого."
+    }
+
+    @classmethod
+    def load_presets(cls) -> Dict[str, str]:
+        try:
+            with open("preset_prompts.json", 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print("❌ Файл preset_prompts.json не найден")
+            return cls.DEFAULT_PRESETS
+        except Exception as e:
+            print(f"Ошибка загрузки пресетов: {e}")
+            return cls.DEFAULT_PRESETS
+
+
+# === AI Chain Processing ===
+class AIChain:
+    def __init__(self, sber_client: GigaChat = None, mistral_client: Mistral = None):
+        self.sber = sber_client
+        self.mistral = mistral_client
+        self.presets = PresetManager.load_presets()
+
+    async def process_query(self, user_prompt: str, history: list) -> Optional[str]:
+        """Process user query through SberAI with optional Mistral enhancement"""
+        print(f"Получен запрос от пользователя: {user_prompt}")
+        print(f"История чата: {len(history)} сообщений")
+
+        try:
+            context = await self._load_context()
+            sber_prompt = self._build_prompt('gigachat_prompt', context)
+
+            print("Отправляем запрос в SberAI...")
+            sber_response = await self._call_sber(user_prompt, history, sber_prompt)
+            print(f"Получен ответ от SberAI: {sber_response[:50]}...")
+
+            if not sber_response:
+                return "Извините, SberAI не дал ответ. Попробуйте переформулировать вопрос."
+
+            # Улучшение ответа через Mistral (опционально)
+            if self.mistral:
+                try:
+                    print("Отправляем запрос в Mistral для улучшения...")
+                    mistral_prompt = self._build_prompt('mistral_summarize_prompt', context)
+                    mistral_response = await self._call_mistral(
+                        f'Клиент: {user_prompt}, Предложенный вариант ответа: {sber_response}',
+                        mistral_prompt
+                    )
+
+                    if mistral_response:
+                        final_response = mistral_response
+                        print(f"Получен улучшенный ответ от Mistral: {final_response[:50]}...")
+                    else:
+                        final_response = sber_response
+                except Exception as e:
+                    print(f'Ошибка Mistral (не критично): {e}')
+                    final_response = sber_response
+            else:
+                final_response = sber_response
+
+            print(f"Финальный ответ: {final_response[:100]}...")
+            return final_response
+
+        except Exception as e:
+            print(f'Ошибка SberAI в chainize: {e}')
+            return "Извините, возникла техническая ошибка. Попробуйте позже."
+
+    async def generate_tip(self, prev_tips: List[str] = None) -> Optional[str]:
+        """Generate psychological tip using SberAI"""
+        try:
+            tip_prompt = self.presets.get('tip_prompt', '')
+            if prev_tips:
+                prev_tips_str = "&".join(prev_tips)
+                tip_prompt += f' Твои предыдущие советы (разделены &): {prev_tips_str}.'
+
+            return await self._call_sber('', [], tip_prompt)
+        except Exception as e:
+            print(f'Ошибка SberAI в get_tip: {e}')
+            return None
+
+    async def _load_context(self) -> Optional[Dict[str, str]]:
+        """Load contextual data from files"""
+        context_dir = Path('context')
+        if not context_dir.exists():
+            return None
+
+        texts = {}
+        try:
+            for file_path in context_dir.glob('*.txt'):
+                try:
+                    content = file_path.read_text(encoding='utf-8')
+                    texts[file_path.name] = content
+                except Exception as e:
+                    print(f"Ошибка чтения файла {file_path}: {e}")
+                    continue
+            return texts if texts else None
+        except Exception as e:
+            print(f"Ошибка при чтении контекстных файлов: {e}")
+            return None
+
+    def _build_prompt(self, preset_key: str, context: Optional[Dict[str, str]]) -> str:
+        """Build enhanced prompt with context"""
+        prompt = self.presets.get(preset_key, '')
+        if context:
+            context_lines = [f'Файл "{key}", содержание: {value}' for key, value in context.items()]
+            prompt += f'\n\nКонтекстная информация:\n{" ".join(context_lines)}'
+        return prompt
+
+    async def _call_sber(self, prompt: str, history: list, system_prompt: str) -> str:
+        """Call SberAI with proper error handling"""
+        if not self.sber:
+            return "Сервис ИИ временно недоступен. Пожалуйста, попробуйте позже."
+        
+        try:
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            # Добавляем историю чата
+            for msg in history[-10:]:  # Берем последние 10 сообщений
+                role = "user" if msg["role"] == "user" else "assistant"
+                messages.append({"role": role, "content": msg["content"]})
+            
+            # Добавляем текущий запрос
+            messages.append({"role": "user", "content": prompt})
+            
+            # Вызов API GigaChat
+            response = self.sber.chat(messages)
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f'Ошибка вызова SberAI: {e}')
+            return None
+
+    async def _call_mistral(self, prompt: str, system_prompt: str) -> Optional[str]:
+        """Call Mistral with retry logic"""
+        if not self.mistral:
+            return None
+            
+        try:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = self.mistral.chat.complete(
+                model="mistral-small-latest",
+                messages=messages
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f'Ошибка вызова Mistral: {e}')
+            return None
+
 
 # === Константы и конфигурация ===
 WELCOME_TEXT = (
@@ -72,20 +262,29 @@ INFO_TEXT = (
 PHONE_RX = re.compile(r"^\+7\(\d{3}\)\d{3}-\d{2}-\d{2}$")
 
 # Загрузка переменных окружения
-dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
-if not os.path.exists(dotenv_path):
-    print(f"❌ Файл .env не найден по пути: {dotenv_path}")
-    exit(1)
+Config.load_env()
+BOT_TOKEN, SBER_TOKEN, MISTRAL_TOKEN, ADMIN_IDS = Config.get_required_env_vars()
 
-load_dotenv(dotenv_path)
-print(f"✅ Переменные окружения загружены из: {dotenv_path}")
+# Инициализация ИИ клиентов (если токены предоставлены)
+sber_client = None
+mistral_client = None
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    print("❌ Переменная BOT_TOKEN не задана в .env")
-    exit(1)
+if SBER_TOKEN:
+    try:
+        sber_client = GigaChat(credentials=SBER_TOKEN, verify_ssl_certs=False)
+        print("✅ SberAI клиент инициализирован")
+    except Exception as e:
+        print(f"❌ Ошибка инициализации SberAI: {e}")
 
-ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(',') if x.strip()}
+if MISTRAL_TOKEN:
+    try:
+        mistral_client = Mistral(api_key=MISTRAL_TOKEN)
+        print("✅ Mistral клиент инициализирован")
+    except Exception as e:
+        print(f"❌ Ошибка инициализации Mistral: {e}")
+
+# Инициализация AI Chain
+ai_chain = AIChain(sber_client, mistral_client)
 
 # === Менеджер сообщений ===
 class MessageManager:
@@ -186,6 +385,9 @@ class QuestionForm(StatesGroup):
 class AdminForm(StatesGroup):
     section = State()
     payload = State()
+
+class AIChatForm(StatesGroup):
+    chat = State()
 
 
 # === Вспомогательные функции ===
@@ -354,7 +556,7 @@ async def cluster_2_help(c: types.CallbackQuery):
     text = (
         "🚨 *Первая помощь при суицидальных мыслях*\n\n"
         "1. **Не оставайся наедине с собой.** Напиши, позвони — хоть кому-то.\n\n"
-        "2. **Используй тревожную кнопку.** Ты получишь контакты, где тебя выслушают *прямо сейчас*.\n\n"
+        "2. **Используй тревожную кнопка.** Ты получишь контакты, где тебя выслушают *прямо сейчас*.\n\n"
         "3. **Запиши, что чувствуешь.** Это поможет разгрузить голову и понять, что именно болит.\n\n"
         "Ты не обязан справляться один. Есть те, кто готов помочь."
     )
@@ -421,7 +623,7 @@ async def cluster_4(c: types.CallbackQuery):
 async def cluster_4_help(c: types.CallbackQuery):
     text = (
         "🥗 *Первая помощь при проблемах с едой*\n\n"
-        "1. **Не сравнивай себя с другими.** Ты не должен «выглядеть» определённо, чтобы быть больным.\n\n"
+        "1. **Не сравнивай себя с другим.** Ты не должен «выглядеть» определённо, чтобы быть больным.\n\n"
         "2. **Запиши, что ешь и как себя чувствуешь.** Это поможет разорвать цикл стыда и контроля.\n\n"
         "3. **Обратись к специалисту.** РПП лечатся — но важно начать до серьёзных последствий.\n\n"
         "Ты заслуживаешь заботы — даже если чувствуешь, что «недостаточно плох»."

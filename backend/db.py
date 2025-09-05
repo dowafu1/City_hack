@@ -1,4 +1,3 @@
-# db.py
 import os
 import asyncio
 from datetime import datetime, timedelta
@@ -12,7 +11,7 @@ async def get_conn():
     host=os.getenv("DB_HOST", "localhost"),
     port=int(os.getenv("DB_PORT", 5432)),
     user=os.getenv("DB_USER", os.getlogin()),
-    password=os.getenv("DB_PASS", ""),
+    password=os.getenv("DB_PASS"),
     database=os.getenv("DB_NAME", "cmp_bot")
   )
   try:
@@ -57,7 +56,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS chat_history (
                 id SERIAL PRIMARY KEY,
                 chat_id BIGINT NOT NULL,
-                role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'ai')),
+                role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'ai', 'assistant')),
                 content TEXT NOT NULL,
                 timestamp TIMESTAMPTZ DEFAULT NOW()
             )
@@ -90,8 +89,8 @@ async def log_action(user_id: int, action: str):
 
 
 async def add_chat_message(chat_id: int, role: str, content: str):
-  if role not in ("user", "ai"):
-    raise ValueError("Role must be 'user' or 'ai'")
+  if role not in ("user", "ai", "assistant"):
+    raise ValueError("Role must be 'user', 'ai' or 'assistant'")
   async with get_conn() as conn:
     await conn.execute(
       "INSERT INTO chat_history (chat_id, role, content) VALUES ($1, $2, $3)",
@@ -106,6 +105,26 @@ async def get_chat_history(chat_id: int) -> list[dict]:
       chat_id
     )
     return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
+# === НОВАЯ ФУНКЦИЯ ===
+async def get_user_chat_history(user_id: int) -> list[dict]:
+  """
+  Получает историю чата для конкретного пользователя
+  """
+  async with get_conn() as conn:
+    rows = await conn.fetch(
+      "SELECT role, content, timestamp FROM chat_history WHERE chat_id = $1 ORDER BY timestamp ASC",
+      user_id
+    )
+    return [
+      {
+        "role": row["role"],
+        "content": row["content"],
+        "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None
+      }
+      for row in rows
+    ]
 
 
 async def get_articles(category: str) -> list[tuple]:
