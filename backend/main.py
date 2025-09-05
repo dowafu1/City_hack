@@ -8,6 +8,7 @@ from langchain_gigachat.chat_models import GigaChat
 from backend.handlers import voice_input_to_text
 from db import init_db, upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip
 
+from ai.voice_recognition import recognize_init
 from db import (
   init_db, upsert_contact, upsert_sos,
   upsert_event, upsert_article, upsert_tip
@@ -32,39 +33,38 @@ from handlers import (
   ai_support, contacts, sos, sos_direct, events,
   question, save_question_handler, tip, sub, back, admin,
   RoleForm, QuestionForm, AdminForm, AIChatForm,
-  stop_ai_chat, handle_ai_chat, voice_input_to_text,
-  init_voice_recognizer
+  stop_ai_chat, handle_ai_chat, voice_input_to_text
 )
 
 
-async def main():
-  Config.load_env()
-  BOT_TOKEN, SBER_TOKEN, MISTRAL_TOKEN, ADMIN_IDS = Config.get_required_env_vars()
+# Инициализация голосового распознавателя
+recognizer_pipe = recognize_init()
 
-  # Инициализация голосового распознавателя
-  init_voice_recognizer()
 
-  sber_client = (
-    GigaChat(credentials=SBER_TOKEN, verify_ssl_certs=False)
-    if SBER_TOKEN else None
-  )
-  if sber_client:
+Config.load_env()
+BOT_TOKEN, SBER_TOKEN, MISTRAL_TOKEN, ADMIN_IDS = Config.get_required_env_vars()
+
+sber_client = (
+GigaChat(credentials=SBER_TOKEN, verify_ssl_certs=False)
+if SBER_TOKEN else None
+)
+if sber_client:
     print("✅ SberAI клиент инициализирован")
 
-  mistral_client = (
-    Mistral(api_key=MISTRAL_TOKEN)
-    if MISTRAL_TOKEN else None
-  )
-  if mistral_client:
+mistral_client = (
+Mistral(api_key=MISTRAL_TOKEN)
+if MISTRAL_TOKEN else None
+)
+if mistral_client:
     print("✅ Mistral клиент инициализирован")
 
-  # Инициализация bot_core
-  bot_core.ai_chain = AIChain(sber_client, mistral_client)
-  bot_core.msg_manager = MessageManager(Bot(token=BOT_TOKEN))
-  bot_core.ADMIN_IDS = ADMIN_IDS
-  print(f"✅ ADMIN_IDS инициализирован: {bot_core.ADMIN_IDS}")
-  bot = bot_core.msg_manager.bot
-  dp = Dispatcher(storage=MemoryStorage())
+# Инициализация bot_core
+bot_core.ai_chain = AIChain(sber_client, mistral_client)
+bot_core.msg_manager = MessageManager(Bot(token=BOT_TOKEN))
+bot_core.ADMIN_IDS = ADMIN_IDS
+print(f"✅ ADMIN_IDS инициализирован: {bot_core.ADMIN_IDS}")
+bot = bot_core.msg_manager.bot
+dp = Dispatcher(storage=MemoryStorage())
 
 dp.callback_query.middleware(AnswerCallbackMiddleware())
 dp.message.middleware(ThrottlingMiddleware())
@@ -80,39 +80,41 @@ dp.callback_query.register(back, F.data == "back")
 dp.callback_query.register(admin, F.data == "admin")
 dp.message.register(sos_direct, F.text == "🚨 Тревожная кнопка")
 
-  callback_map = {
-    "change_role": change_role,
-    "navigator": navigator,
-    "cluster_1": cluster_1,
-    "cluster_1_help": cluster_1_help,
-    "cluster_2": cluster_2,
-    "cluster_2_help": cluster_2_help,
-    "cluster_3": cluster_3,
-    "cluster_3_help": cluster_3_help,
-    "cluster_4": cluster_4,
-    "cluster_4_help": cluster_4_help,
-    "cluster_5": cluster_5,
-    "cluster_5_help": cluster_5_help,
-    "cluster_6": cluster_6,
-    "cluster_6_help": cluster_6_help,
-    "ai_support": ai_support,
-    "contacts": contacts,
-    "sos": sos,
-    "events": events,
-    "question": question,
-    "tip": tip,
-    "sub": sub,
-    "back": back,
-    "admin": admin,
-  }
+callback_map = {
+"change_role": change_role,
+"navigator": navigator,
+"cluster_1": cluster_1,
+"cluster_1_help": cluster_1_help,
+"cluster_2": cluster_2,
+"cluster_2_help": cluster_2_help,
+"cluster_3": cluster_3,
+"cluster_3_help": cluster_3_help,
+"cluster_4": cluster_4,
+"cluster_4_help": cluster_4_help,
+"cluster_5": cluster_5,
+"cluster_5_help": cluster_5_help,
+"cluster_6": cluster_6,
+"cluster_6_help": cluster_6_help,
+"ai_support": ai_support,
+"contacts": contacts,
+"sos": sos,
+"events": events,
+"question": question,
+"tip": tip,
+"sub": sub,
+"back": back,
+"admin": admin,
+}
 
-  for data, handler in callback_map.items():
+for data, handler in callback_map.items():
     dp.callback_query.register(handler, F.data == data)
 
-  await init_db()
-  asyncio.create_task(notifier(bot))
-  print("🤖 Бот запущен и готов к работе.")
-  await dp.start_polling(bot)
+
+async def main():
+    await init_db()
+    asyncio.create_task(notifier(bot))
+    print("🤖 Бот запущен и готов к работе.")
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
