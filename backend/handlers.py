@@ -376,27 +376,26 @@ async def ai_support(c: types.CallbackQuery, state: FSMContext):
 
 
 async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_text: str = None):
-  user_id = m.from_user.id
-  if another_text is None:  # работа с voice сообщением
-    user_message = m.text
-  else:
-    user_message = another_text
+    user_id = m.from_user.id
+    if another_text is None:  # работа с voice сообщением
+        user_message = m.text
+    else:
+        user_message = another_text
 
-  # Проверка на None или пустую строку
-  if not user_message or not user_message.strip():
-    await m.answer("Сообщение пустое. Пожалуйста, отправьте текстовое сообщение.")
-    return
+    # Проверка на None или пустую строку
+    if not user_message or not user_message.strip():
+        await m.answer("Сообщение пустое. Пожалуйста, отправьте текстовое сообщение.")
+        return
 
-  # Добавляем сообщение пользователя в историю (только во время активного диалога)
-  await add_chat_message(user_id, "user", user_message)
+    # Добавляем сообщение пользователя в историю (только во время активного диалога)
+    await add_chat_message(user_id, "user", user_message)
 
-  # Получаем историю чата
-  history = await get_user_chat_history(user_id)
+    # Получаем историю чата
+    history = await get_user_chat_history(user_id)
 
-  # Отправляем сообщение о том, что ИИ думает
-  thinking_msg = await m.answer("🤔 Думаю над ответом...")
+    # Отправляем сообщение о том, что ИИ думает
+    thinking_msg = await m.answer("🤔 Думаю над ответом...")
 
-  try:
     # Получаем ответ от ИИ
     ai_response = await get_ai_chain().process_query(user_message, history)
 
@@ -412,9 +411,9 @@ async def handle_ai_chat(m: types.Message, state: FSMContext = None, another_tex
     else:
       await m.answer("Извините, не удалось получить ответ. Попробуйте еще раз.")
 
-  except Exception as e:
-    print(f"Ошибка в AI чате: {e}")
-    await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
+  # except Exception as e:
+  #   print(f"Ошибка в AI чате: {str(e)}")
+  #   await m.answer("Произошла ошибка. Попробуйте еще раз или завершите диалог командой /stop")
 
 
 async def stop_ai_chat(m: types.Message, state: FSMContext):
@@ -562,15 +561,17 @@ async def sub(c: types.CallbackQuery):
   await show_main(c.from_user.id)
 
 
-async def voice_input_to_text(message: types.Message, rec_pipe, bot: Bot):
+async def voice_input_to_text(message: types.Message, state, rec_pipe, bot: Bot):
+    # if not message.voice:
+    #     await handle_ai_chat(message)
+    #     return
     voice_file = await bot.get_file(message.voice.file_id)
 
     if not os.path.exists('temp'):
         os.mkdir('temp')
-    await bot.download_file(voice_file.file_path, destination=f'temp/{voice_file.fileid}')
-    text = await recognize(f'temp/{voice_file.fileid}.ogg', rec_pipe)
+    await bot.download_file(voice_file.file_path, destination=f'temp/{voice_file.file_id}.ogg')
+    text = await recognize(f'temp/{voice_file.file_id}.ogg', rec_pipe)
     print(f'Распознанный текст: {text}')
-    message.text = text
     await handle_ai_chat(message, another_text=text)
 
 

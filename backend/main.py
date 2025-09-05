@@ -5,14 +5,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from mistralai import Mistral
 from langchain_gigachat.chat_models import GigaChat
 
-from backend.handlers import voice_input_to_text
-from db import init_db, upsert_contact, upsert_sos, upsert_event, upsert_article, upsert_tip
-
 from ai.voice_recognition import recognize_init
-from db import (
-  init_db, upsert_contact, upsert_sos,
-  upsert_event, upsert_article, upsert_tip
-)
+from db import init_db
 from config import Config
 import bot_core
 from bot_core import (
@@ -51,6 +45,9 @@ print(f"✅ ADMIN_IDS инициализирован: {bot_core.ADMIN_IDS}")
 bot = bot_core.msg_manager.bot
 dp = Dispatcher(storage=MemoryStorage())
 
+async def voice_handler(message, state):  # для догрузки аргументов в асинхронную функцию
+    await voice_input_to_text(message, state, recognizer_pipe, bot)
+
 
 # Импортируем хендлеры ПОСЛЕ инициализации bot_core
 from handlers import (
@@ -71,12 +68,12 @@ dp.callback_query.middleware(AnswerCallbackMiddleware())
 dp.message.middleware(ThrottlingMiddleware())
 dp.message.register(start, Command("start"))
 dp.message.register(stop_ai_chat, Command("stop"))
+dp.message.register(voice_handler, F.voice, AIChatForm.chat)
 dp.message.register(handle_ai_chat, AIChatForm.chat)
 dp.message.register(choose_role, RoleForm.role)
 dp.message.register(save_question_handler, QuestionForm.question)
 dp.callback_query.register(tip, F.data == "tip")
 dp.callback_query.register(sub, F.data == "sub")
-dp.message.register(voice_input_to_text, F.voice, recognizer_pipe, bot)
 dp.callback_query.register(back, F.data == "back")
 dp.callback_query.register(admin, F.data == "admin")
 dp.message.register(sos_direct, F.text == "🚨 Тревожная кнопка")

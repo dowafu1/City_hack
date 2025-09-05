@@ -1,9 +1,8 @@
 import asyncio
 import os
-import json
 
-from sber_ai import make_chat as sber_chat
-from mistral_ai import make_chat as mistral_chat
+from ai.sber_ai import make_chat as sber_chat
+from ai.mistral_ai import make_chat as mistral_chat
 
 from mistralai import Mistral
 from mistralai.models.sdkerror import SDKError
@@ -11,16 +10,14 @@ from langchain_gigachat.chat_models import GigaChat
 
 from aiofiles import open as aio_open
 
-prepromts = json.load(open("../backend/preset_prompts.json", 'rb'))
 
-
-async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mistral) -> str | None:
+async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mistral, prepromts: dict) -> str | None:
     tries_count = 7
     context_data = await get_context_data('context')
     if context_data is not None:
         context_data = [f'Файл "{key}", содержание: {value}' for key, value in context_data.items()]
     try:
-        total_answer = await sber_chat(sber, user_prompt, history, preset_prompt=prepromts['gigachat_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}')
+        total_answer = await sber_chat(sber, user_prompt, history, preset_prompt=(prepromts['gigachat_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}'))
     except Exception as e:
         print(f'Обвал SberAI в ai/ai_chain.py, chainize: {e}')
         return None
@@ -30,8 +27,8 @@ async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mis
                 mistral,
                 f'Клиент: {user_prompt}, Предложенный вариант ответа: {total_answer}',
                 [],
-                preset_prompt=prepromts[
-                                  'mistral_summarize_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}')
+                preset_prompt=(prepromts[
+                                  'mistral_summarize_prompt'] + f' Еще у тебя есть теория, которая тебе может помочь разобраться с проблемой: {'\n'.join(context_data)}'))
 
             total_answer = mistral_answer
             break
@@ -48,7 +45,7 @@ async def chainize(user_prompt: str, history: list, sber: GigaChat, mistral: Mis
     return total_answer
 
 
-async def get_tip(sber: GigaChat, prev_tips: list[str]) -> str | None:
+async def get_tip(sber: GigaChat, prev_tips: list[str], prepromts: dict) -> str | None:
     try:
         total_answer = await sber_chat(
             sber,
@@ -66,7 +63,7 @@ async def get_tip(sber: GigaChat, prev_tips: list[str]) -> str | None:
 
 async def get_context_data(context_directory: str = 'context') -> dict[str, str] | None:
     texts = {}
-    for file in [file for file in os.walk('context')][0][2:][0]:
+    for file in [file for file in os.walk(os.curdir + '/context')][0][2:][0]:
         async with aio_open(f'{context_directory}/{file}', 'r', encoding='utf-8') as f:
             texts[file] = await f.read()
     return texts if texts else None

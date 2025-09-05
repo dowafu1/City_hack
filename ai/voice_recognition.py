@@ -3,6 +3,7 @@ import torch
 import soundfile as sf
 import librosa
 import numpy as np
+import asyncio
 
 
 def recognize_init(model="openai/whisper-base"):  # model="openai/whisper-large-v3"
@@ -61,6 +62,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    import asyncio
-
     asyncio.run(main())
